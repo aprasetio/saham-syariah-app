@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sharia Stock Screener", layout="wide", page_icon="☪️")
+st.set_page_config(page_title="Sharia Stock AI", layout="wide", page_icon="📈")
 
 # --- DAFTAR SAHAM SYARIAH (JII 30) ---
 SHARIA_STOCKS = [
@@ -16,209 +16,203 @@ SHARIA_STOCKS = [
     "AMRT", "ASII", "TPIA"
 ]
 
-# --- HELPER: PEMBERSIH DATA (FIX ERROR) ---
+# --- HELPER: PEMBERSIH DATA ---
 def fix_dataframe(df):
-    """
-    Membersihkan DataFrame dari MultiIndex dan Kolom Duplikat
-    agar tidak error saat dihitung pandas_ta.
-    """
-    if df.empty:
-        return df
-        
-    # 1. Jika MultiIndex (Bertingkat), ambil level terbawah (Nama Ticker/Harga)
+    if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex):
         try:
-            # Biasanya level 0 adalah Price (Open/Close), level 1 adalah Ticker
-            # Kita drop level Ticker jika ada
             df.columns = df.columns.get_level_values(0)
-        except:
-            pass
-    
-    # 2. Standarisasi Nama Kolom (Huruf Depan Kapital)
-    # Contoh: 'close' -> 'Close', 'Adj Close' -> 'Adj close'
+        except: pass
     df.columns = [str(c).capitalize() for c in df.columns]
-    
-    # 3. HAPUS KOLOM DUPLIKAT (Ini penyebab utama error Anda)
-    # Kadang ada dua kolom 'Close'. Kita ambil yang pertama saja.
     df = df.loc[:, ~df.columns.duplicated()]
-    
-    # 4. Pastikan kolom wajib ada
-    required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-    for col in required_cols:
-        if col not in df.columns:
-            # Jika misal 'Volume' tidak ada, isi 0
-            df[col] = 0
-            
-    # Kembalikan hanya kolom yang dibutuhkan agar bersih
-    return df[required_cols]
+    return df
 
-# --- 1. FUNGSI ANALISA TEKNIKAL ---
+# --- FUNGSI DETEKSI POLA CANDLESTICK (BARU!) ---
+def check_candlestick_patterns(curr, prev):
+    """
+    Mendeteksi pola candle berdasarkan bentuk geometri
+    curr = data hari ini (Current)
+    prev = data kemarin (Previous)
+    """
+    pattern_score = 0
+    pattern_name = []
+    
+    # Hitung ukuran candle hari ini
+    body_size = abs(curr['Close'] - curr['Open'])
+    upper_wick = curr['High'] - max(curr['Close'], curr['Open'])
+    lower_wick = min(curr['Close'], curr['Open']) - curr['Low']
+    total_range = curr['High'] - curr['Low']
+    
+    # 1. POLA HAMMER (Palu) - Sinyal Reversal Kuat
+    # Syarat: Ekor bawah panjang (2x badan), ekor atas kecil, tren sedang turun (RSI < 50)
+    if (lower_wick > 2 * body_size) and (upper_wick < body_size) and (curr['Rsi'] < 50):
+        pattern_score += 1.5
+        pattern_name.append("🔨 Hammer (Pantulan Kuat)")
+
+    # 2. POLA BULLISH ENGULFING (Memakan)
+    # Syarat: Kemarin Merah, Hari ini Hijau & Badan hari ini menutupi badan kemarin
+    if (prev['Close'] < prev['Open']) and (curr['Close'] > curr['Open']): # Kemarin Merah, Skrg Hijau
+        if (curr['Open'] < prev['Close']) and (curr['Close'] > prev['Open']):
+            pattern_score += 2
+            pattern_name.append("🦁 Bullish Engulfing (Dominasi Pembeli)")
+
+    # 3. POLA DOJ (Ragu-ragu)
+    # Syarat: Badan sangat tipis (Open mirip Close)
+    if (body_size <= (0.1 * total_range)):
+        pattern_name.append("✨ Doji (Pasar Galau)")
+        # Doji netral, tapi jika muncul di RSI rendah bisa jadi tanda balik arah
+        if curr['Rsi'] < 30:
+            pattern_score += 0.5
+            pattern_name.append("(Potensi Reversal)")
+
+    return pattern_score, pattern_name
+
+# --- FUNGSI ANALISA TEKNIKAL ---
 def calculate_technical(df):
-    # Pastikan data bersih dulu
     df = fix_dataframe(df)
     
-    # Hitung RSI (Explicitly use Close column)
-    # Gunakan .iloc untuk memastikan kita mengambil Series (1 dimensi)
+    # RSI
     try:
-        rsi_val = df.ta.rsi(close=df['Close'], length=14)
-        # Jika hasilnya DataFrame (karena bug), paksa jadi Series
-        if isinstance(rsi_val, pd.DataFrame):
-            rsi_val = rsi_val.iloc[:, 0]
-        df['Rsi'] = rsi_val
-    except Exception:
-        df['Rsi'] = 50 # Default jika gagal
+        rsi = df.ta.rsi(close=df['Close'], length=14)
+        if isinstance(rsi, pd.DataFrame): rsi = rsi.iloc[:, 0]
+        df['Rsi'] = rsi
+    except: df['Rsi'] = 50
     
-    # Hitung MACD
+    # MACD
     try:
         macd = df.ta.macd(close=df['Close'], fast=12, slow=26, signal=9)
-        # macd return DataFrame, kita gabung aman
         df = pd.concat([df, macd], axis=1)
-    except Exception:
-        pass
-        
-    # Hitung Bollinger Bands
+    except: pass
+    
+    # Bollinger
     try:
         bbands = df.ta.bbands(close=df['Close'], length=20, std=2)
         df = pd.concat([df, bbands], axis=1)
-    except Exception:
-        pass
+    except: pass
     
     # Volume MA
-    df['Vol_ma_20'] = df['Volume'].rolling(window=20).mean()
+    if 'Volume' in df.columns:
+        df['Vol_ma_20'] = df['Volume'].rolling(window=20).mean()
+    else:
+        df['Volume'] = 0
+        df['Vol_ma_20'] = 0
     
     return df
 
-def get_signal_score(row):
+# --- LOGIKA SKOR FINAL ---
+def get_final_analysis(df):
+    if len(df) < 2: return 0, ["Data kurang"]
+    
+    curr = df.iloc[-1]
+    prev = df.iloc[-2]
+    
     score = 0
+    reasons = []
     
-    # Ambil nilai dengan aman (.get) agar tidak error jika kolom hilang
-    # Nama kolom default MACD dari pandas-ta
-    macd_val = row.get('MACD_12_26_9', 0)
-    macd_sig = row.get('MACDs_12_26_9', 0)
+    # A. Indikator (MACD & RSI)
+    macd_val = curr.get('MACD_12_26_9', 0)
+    macd_sig = curr.get('MACDs_12_26_9', 0)
     
-    if macd_val > macd_sig: score += 1
-    else: score -= 1
+    if macd_val > macd_sig: 
+        score += 1
+        reasons.append("📈 Trend: MACD Naik")
+    
+    rsi = curr.get('Rsi', 50)
+    if rsi < 30: 
+        score += 1.5
+        reasons.append("💎 Momentum: Oversold (Murah)")
+    elif rsi > 70: 
+        score -= 2
+        reasons.append("⚠️ Momentum: Overbought (Mahal)")
 
-    # RSI
-    rsi = row.get('Rsi', 50)
-    if pd.isna(rsi): rsi = 50 # Handle NaN
-    
-    if rsi < 30: score += 2  
-    elif rsi > 70: score -= 2 
-    
-    # Volume
-    vol = row.get('Volume', 0)
-    vol_ma = row.get('Vol_ma_20', 0)
-    
-    if vol_ma > 0 and vol > (1.5 * vol_ma):
+    # B. Analisa Volume
+    vol = curr.get('Volume', 0)
+    vol_ma = curr.get('Vol_ma_20', 1)
+    if vol > (1.5 * vol_ma):
         score += 0.5
-        
-    return score
+        reasons.append("🚀 Volume: Ledakan Transaksi")
 
-# --- 2. FITUR SCREENER ---
+    # C. ANALISA CANDLESTICK (BARU!)
+    candle_score, candle_patterns = check_candlestick_patterns(curr, prev)
+    score += candle_score
+    if candle_patterns:
+        reasons.append(f"🕯️ Pola: {', '.join(candle_patterns)}")
+
+    return score, reasons, curr
+
+# --- FITUR SCREENER ---
 def run_screener():
-    st.header("🔍 Market Screener (Saham Syariah JII)")
+    st.header("🔍 Market Screener (Technical + Candlestick)")
     
     if st.button("Mulai Scan Pasar"):
-        progress_bar = st.progress(0)
+        progress = st.progress(0)
         results = []
-        
         tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
         
-        # Download Data (Auto Adjust False agar struktur lebih stabil)
         data = yf.download(tickers, period="6mo", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
-        total = len(tickers)
-        for i, ticker_raw in enumerate(tickers):
-            progress_bar.progress((i + 1) / total)
-            
+        for i, t in enumerate(tickers):
+            progress.progress((i+1)/len(tickers))
             try:
-                # Ambil data per saham
-                # PENTING: .copy() agar tidak merusak data asli
-                df_stock = data[ticker_raw].copy()
+                df = data[t].copy()
+                df = fix_dataframe(df)
+                if df.empty: continue
                 
-                # Bersihkan Data
-                df_stock = fix_dataframe(df_stock)
+                df = calculate_technical(df)
+                score, reasons, last_row = get_final_analysis(df)
                 
-                if df_stock.empty: continue
-                
-                # Drop baris NaN
-                df_stock.dropna(subset=['Close'], inplace=True)
-
-                # Analisa
-                df_stock = calculate_technical(df_stock)
-                last_row = df_stock.iloc[-1]
-                
-                score = get_signal_score(last_row)
-                
-                if score >= 1:
-                    rec = "STRONG BUY" if score >= 2 else "BUY"
+                if score >= 1.5: # Ambang batas minimal
+                    rec = "STRONG BUY" if score >= 2.5 else "BUY"
                     results.append({
-                        "Kode": ticker_raw.replace(".JK", ""),
-                        "Harga": last_row['Close'],
+                        "Saham": t.replace(".JK",""),
+                        "Harga": int(last_row['Close']),
                         "RSI": round(last_row.get('Rsi', 0), 2),
-                        "Rekomendasi": rec,
-                        "Score": score
+                        "Sinyal": rec,
+                        "Skor": score,
+                        "Alasan Utama": ", ".join(reasons)
                     })
-                    
-            except Exception as e:
-                # Skip saham yang error, jangan stop aplikasi
-                continue
+            except: continue
             
-        progress_bar.empty()
+        progress.empty()
         
-        if len(results) > 0:
-            st.success(f"Ditemukan {len(results)} Saham Potensial!")
-            df_res = pd.DataFrame(results).sort_values(by="Score", ascending=False)
-            st.dataframe(df_res, use_container_width=True)
+        if results:
+            st.success(f"Ketemu {len(results)} Saham Pilihan!")
+            st.dataframe(pd.DataFrame(results).sort_values("Skor", ascending=False), use_container_width=True)
         else:
-            st.warning("Tidak ada sinyal BUY yang kuat saat ini.")
+            st.warning("Pasar sedang sepi sinyal bagus.")
 
-# --- 3. FITUR CHART DETAIL ---
-def show_single_chart():
-    st.header("📊 Detail Chart Analysis")
-    ticker = st.text_input("Masukkan Kode Saham", value="ADRO").upper()
-    
+# --- FITUR CHART ---
+def show_chart():
+    st.header("📊 Analisa Detail")
+    ticker = st.text_input("Kode Saham", "ANTM").upper()
     if ticker:
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
-        
-        # Download data tunggal
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
-        
-        # Bersihkan & Analisa
         df = calculate_technical(df)
         
         if not df.empty:
+            score, reasons, last = get_final_analysis(df)
+            
+            st.subheader(f"Skor AI: {score} ({'Beli' if score > 1.5 else 'Wait/Jual'})")
+            for r in reasons: st.write(f"- {r}")
+            
             # Chart
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
             
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
-                                         low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
-            
-            # Bollinger (Cek kolom dulu)
-            if 'BBU_20_2.0' in df.columns:
-                fig.add_trace(go.Scatter(x=df.index, y=df['BBU_20_2.0'], line=dict(color='gray', dash='dot'), name='Upper BB'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['BBL_20_2.0'], line=dict(color='gray', dash='dot'), name='Lower BB'), row=1, col=1)
+            # Tambahkan Marker Pola Candle jika ada (Visualisasi)
+            # Ini fitur visual canggih: Menandai Hammer di chart
+            # Kita tandai candle terakhir saja
+            if "Hammer" in str(reasons):
+                fig.add_annotation(x=df.index[-1], y=df['Low'].iloc[-1], text="Hammer!", showarrow=True, arrowhead=1)
 
             colors = ['red' if row['Open'] - row['Close'] >= 0 else 'green' for index, row in df.iterrows()]
-            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
-            
-            fig.update_layout(xaxis_rangeslider_visible=False, height=600)
+            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Vol'), row=2, col=1)
+            fig.update_layout(xaxis_rangeslider_visible=False, height=500)
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Info
-            last = df.iloc[-1]
-            c1, c2, c3 = st.columns(3)
-            c1.metric("RSI", f"{last.get('Rsi', 0):.2f}")
-            c2.metric("MACD", f"{last.get('MACD_12_26_9', 0):.2f}")
-            c3.metric("Volume", f"{int(last.get('Volume', 0)):,}")
-        else:
-            st.error("Data saham tidak ditemukan.")
 
-# --- MAIN LAYOUT ---
-mode = st.sidebar.radio("Pilih Mode:", ["🔍 Market Screener (Cari Saham)", "📊 Single Chart (Lihat Detail)"])
-
-if mode == "🔍 Market Screener (Cari Saham)":
-    run_screener()
-else:
-    show_single_chart()
+# --- MAIN ---
+mode = st.sidebar.radio("Menu", ["Screener (Scan)", "Chart (Detail)"])
+if mode == "Screener (Scan)": run_screener()
+else: show_chart()
+ 
