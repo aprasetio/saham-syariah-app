@@ -8,15 +8,40 @@ from plotly.subplots import make_subplots
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Pro Stock Analyst", layout="wide", page_icon="💎")
 
-# --- 2. CSS FIX (TAMPILAN) ---
+# --- 2. CSS FIX (TAMPILAN DARK MODE - UPDATE) ---
+# Kode ini diperbarui untuk memaksa SEMUA elemen teks dalam kotak menjadi gelap
 st.markdown("""
 <style>
-    div[data-testid="stMetric"] {
-        background-color: #f0f2f6 !important;
-        border: 1px solid #d6d6d6; color: black !important;
+    /* 1. Target Kotak Utama */
+    [data-testid="stMetric"] {
+        background-color: #f0f2f6 !important; /* Latar Putih Abu */
+        border: 1px solid #d6d6d6 !important;
+        padding: 10px !important;
+        border-radius: 10px !important;
     }
-    div[data-testid="stMetricLabel"] p { color: #31333F !important; }
-    div[data-testid="stMetricValue"] div { color: #000000 !important; }
+
+    /* 2. Target JUDUL KECIL (Label) - Masalah Anda sebelumnya disini */
+    [data-testid="stMetricLabel"] {
+        color: #31333F !important;     /* Abu-abu Gelap */
+        font-weight: bold !important;  /* Tebalkan sedikit */
+    }
+    
+    /* Paksa semua anak elemen di dalam label juga hitam */
+    [data-testid="stMetricLabel"] p, 
+    [data-testid="stMetricLabel"] div, 
+    [data-testid="stMetricLabel"] label {
+        color: #31333F !important;
+    }
+
+    /* 3. Target ANGKA BESAR (Value) */
+    [data-testid="stMetricValue"] {
+        color: #000000 !important; /* Hitam Pekat */
+    }
+    
+    /* Paksa anak elemen value juga hitam */
+    [data-testid="stMetricValue"] div {
+        color: #000000 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -54,7 +79,7 @@ def get_fundamental_info(symbol):
         return data
     except: return None
 
-# --- 6. FUNGSI LEGEND / PANDUAN (BARU DIKEMBALIKAN) ---
+# --- 6. FUNGSI LEGEND / PANDUAN ---
 def show_legend():
     with st.expander("📖 KAMUS & PANDUAN CARA BACA (Klik Disini)", expanded=False):
         st.markdown("### 🏆 Arti Rekomendasi")
@@ -139,7 +164,7 @@ def score_technical(df):
 # --- 9. FITUR SCREENER ---
 def run_screener():
     st.header("🔍 Screener: Fundamental + Teknikal")
-    show_legend() # TAMPILKAN LEGEND DISINI
+    show_legend() 
     
     if st.button("MULAI SCANNING (Mode Lambat & Akurat)"):
         progress = st.progress(0)
@@ -205,7 +230,7 @@ def run_screener():
 # --- 10. FITUR CHART DETAIL ---
 def show_chart():
     st.header("📊 Deep Dive Analysis")
-    show_legend() # TAMPILKAN LEGEND DISINI JUGA
+    show_legend()
     
     ticker = st.text_input("Kode Saham", "ADRO").upper()
     if ticker:
