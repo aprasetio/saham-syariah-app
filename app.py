@@ -6,39 +6,21 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sharia Stock AI", layout="wide", page_icon="📈")
+st.set_page_config(page_title="Pro Stock Analyst", layout="wide", page_icon="💎")
 
-# --- 2. CSS FIX (AGAR JELAS DI DARK MODE) ---
-# Kode ini memaksa kotak angka berwarna terang dengan tulisan HITAM
+# --- 2. CSS FIX (TAMPILAN) ---
 st.markdown("""
 <style>
-    /* Mengubah tampilan Metric Card */
     div[data-testid="stMetric"] {
-        background-color: #f0f2f6 !important; /* Latar belakang abu-abu terang */
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #d6d6d6;
-        color: black !important;
+        background-color: #f0f2f6 !important;
+        border: 1px solid #d6d6d6; color: black !important;
     }
-    
-    /* Memaksa Label (Judul kecil) menjadi abu-abu gelap */
-    div[data-testid="stMetricLabel"] p {
-        color: #31333F !important;
-    }
-    
-    /* Memaksa Value (Angka besar) menjadi hitam pekat */
-    div[data-testid="stMetricValue"] div {
-        color: #000000 !important;
-    }
-    
-    /* Memaksa Delta (Persentase) agar tetap terlihat */
-    div[data-testid="stMetricDelta"] div {
-        color: inherit !important;
-    }
+    div[data-testid="stMetricLabel"] p { color: #31333F !important; }
+    div[data-testid="stMetricValue"] div { color: #000000 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DAFTAR SAHAM SYARIAH (JII 30) ---
+# --- 3. DAFTAR SAHAM (JII 30) ---
 SHARIA_STOCKS = [
     "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
     "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
@@ -46,285 +28,222 @@ SHARIA_STOCKS = [
     "AMRT", "ASII", "TPIA"
 ]
 
-# --- 4. HELPER: PEMBERSIH DATA (PENTING) ---
+# --- 4. HELPER: CLEAN DATA ---
 def fix_dataframe(df):
-    """Membersihkan format data yfinance agar bisa dihitung"""
     if df.empty: return df
-    
-    # Ratakan MultiIndex jika ada
     if isinstance(df.columns, pd.MultiIndex):
-        try:
-            df.columns = df.columns.get_level_values(0)
+        try: df.columns = df.columns.get_level_values(0)
         except: pass
-        
-    # Standarisasi Nama Kolom
     df.columns = [str(c).capitalize() for c in df.columns]
-    
-    # Hapus kolom duplikat (Solusi Error 'Cannot set DataFrame...')
     df = df.loc[:, ~df.columns.duplicated()]
-    
     return df
 
-# --- 5. FUNGSI DETEKSI POLA CANDLESTICK ---
-def check_candlestick_patterns(curr, prev):
-    pattern_score = 0
-    pattern_name = []
-    
+# --- 5. FUNGSI FETCH FUNDAMENTAL ---
+@st.cache_data(ttl=3600) 
+def get_fundamental_info(symbol):
     try:
-        body_size = abs(curr['Close'] - curr['Open'])
-        upper_wick = curr['High'] - max(curr['Close'], curr['Open'])
-        lower_wick = min(curr['Close'], curr['Open']) - curr['Low']
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        data = {
+            "PBV": info.get('priceToBook', None),
+            "PER": info.get('trailingPE', None),
+            "ROE": info.get('returnOnEquity', None), 
+            "DER": info.get('debtToEquity', None),   
+            "MarketCap": info.get('marketCap', 0)
+        }
+        return data
+    except: return None
+
+# --- 6. FUNGSI LEGEND / PANDUAN (BARU DIKEMBALIKAN) ---
+def show_legend():
+    with st.expander("📖 KAMUS & PANDUAN CARA BACA (Klik Disini)", expanded=False):
+        st.markdown("### 🏆 Arti Rekomendasi")
+        c1, c2, c3 = st.columns(3)
+        c1.info("**💎 GEM (Permata):**\nSaham Sempurna! Fundamental Bagus (Laba Tinggi/Murah) DAN Teknikal Bagus (Sedang Naik). Target Utama.")
+        c2.success("**🛡️ INVEST BUY:**\nFundamental Sangat Bagus (Aman untuk jangka panjang), tapi harga sedang diam/turun. Cocok untuk menabung.")
+        c3.warning("**📈 TRADING BUY:**\nFundamental Biasa/Jelek, tapi Grafik Teknikal Bagus (Ada Bandar/Volume). Hanya untuk jangka pendek (Cepat Jual).")
         
-        # 1. HAMMER (Palu)
-        if (lower_wick > 2 * body_size) and (upper_wick < body_size):
-            pattern_score += 1.0
-            pattern_name.append("🔨 Hammer")
+        st.divider()
+        
+        st.markdown("### 📊 Indikator Fundamental (Kualitas)")
+        f1, f2, f3, f4 = st.columns(4)
+        f1.write("**PBV (Harga vs Aset)**\n* < 1x: Murah (Diskon)\n* > 2x: Wajar/Mahal")
+        f2.write("**PER (Balik Modal)**\n* < 10x: Cepat (Murah)\n* > 20x: Lama (Mahal)")
+        f3.write("**ROE (Profitabilitas)**\n* > 15%: Perusahaan Hebat\n* < 5%: Perusahaan Lemah")
+        f4.write("**DER (Utang)**\n* < 100%: Aman\n* > 150%: Risiko Tinggi")
 
-        # 2. BULLISH ENGULFING
-        if (prev['Close'] < prev['Open']) and (curr['Close'] > curr['Open']): 
-            if (curr['Open'] < prev['Close']) and (curr['Close'] > prev['Open']):
-                pattern_score += 1.5
-                pattern_name.append("🦁 Engulfing")
+# --- 7. LOGIKA SKOR FUNDAMENTAL ---
+def score_fundamental(data):
+    score = 0
+    reasons = []
+    if not data: return 0, ["Data Fundamental N/A"]
 
-        # 3. MARUBOZU (Full Body Green)
-        if (curr['Close'] > curr['Open']) and (upper_wick < body_size * 0.1) and (lower_wick < body_size * 0.1):
-            pattern_score += 1.0
-            pattern_name.append("🟩 Marubozu")
-            
-    except: pass # Skip jika data tidak lengkap
+    # PBV
+    pbv = data['PBV']
+    if pbv is not None:
+        if pbv < 1.0: score += 2; reasons.append("💎 PBV Sangat Murah (<1x)")
+        elif pbv < 2.0: score += 1
+        elif pbv > 5.0: score -= 1; reasons.append("⚠️ PBV Mahal")
 
-    return pattern_score, pattern_name
+    # PER
+    per = data['PER']
+    if per is not None:
+        if 0 < per < 10: score += 2; reasons.append("💎 PER Murah (<10x)")
+        elif per > 30: score -= 1; reasons.append("⚠️ PER Mahal")
 
-# --- 6. FUNGSI ANALISA TEKNIKAL ---
+    # ROE
+    roe = data['ROE']
+    if roe is not None:
+        roe_pct = roe * 100 
+        if roe_pct > 15: score += 2; reasons.append(f"🔥 ROE Tinggi ({roe_pct:.1f}%)")
+        elif roe_pct < 5: score -= 1; reasons.append("🔻 ROE Rendah")
+
+    # DER
+    der = data['DER']
+    if der is not None:
+        if der < 50: score += 2; reasons.append("🛡️ Utang Sangat Aman")
+        elif der > 150: score -= 2; reasons.append("⚠️ Utang Berbahaya")
+
+    return score, reasons
+
+# --- 8. LOGIKA TEKNIKAL ---
 def calculate_technical(df):
     df = fix_dataframe(df)
-    
     try:
-        # RSI
-        rsi = df.ta.rsi(close=df['Close'], length=14)
-        if isinstance(rsi, pd.DataFrame): rsi = rsi.iloc[:, 0]
-        df['Rsi'] = rsi
-        
-        # MACD
-        macd = df.ta.macd(close=df['Close'], fast=12, slow=26, signal=9)
+        df['Rsi'] = df.ta.rsi(length=14)
+        macd = df.ta.macd(fast=12, slow=26, signal=9)
         df = pd.concat([df, macd], axis=1)
-        
-        # Bollinger Bands
-        bbands = df.ta.bbands(close=df['Close'], length=20, std=2)
-        df = pd.concat([df, bbands], axis=1)
-        
-        # Volume MA
-        col_vol = 'Volume' if 'Volume' in df.columns else 'Vol'
-        if col_vol in df.columns:
-            df['Vol_ma_20'] = df[col_vol].rolling(window=20).mean()
-        else:
-            df['Vol_ma_20'] = 0
-            
+        ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low'])) * df['Volume']
+        df['CMF'] = ad.rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
     except: pass
-    
     return df
 
-# --- 7. LOGIKA SKOR FINAL (AI SCORE) ---
-def get_final_analysis(df):
-    if len(df) < 2: return 0, ["Data kurang"], df.iloc[-1]
-    
+def score_technical(df):
+    if df.empty or len(df) < 2: return 0, ["Data Kurang"], df.iloc[-1]
     curr = df.iloc[-1]
-    prev = df.iloc[-2]
-    
     score = 0
     reasons = []
     
-    # 1. MACD (Trend) - Bobot: 1.0
-    macd_val = curr.get('MACD_12_26_9', 0)
-    macd_sig = curr.get('MACDs_12_26_9', 0)
+    if curr.get('MACD_12_26_9', 0) > curr.get('MACDs_12_26_9', 0): score += 1; reasons.append("📈 Trend Naik (MACD)")
+    else: score -= 1
     
-    if macd_val > macd_sig: 
-        score += 1.0
-        reasons.append("📈 Trend Naik (MACD)")
-    else:
-        score -= 1.0 
-
-    # 2. RSI (Momentum) - Bobot: 1.5
     rsi = curr.get('Rsi', 50)
-    if rsi < 35: 
-        score += 1.5
-        reasons.append("💎 Harga Diskon (RSI Oversold)")
-    elif 35 <= rsi <= 60:
-        score += 0.5 
-    elif rsi > 70: 
-        score -= 2.0
-        reasons.append("⚠️ Harga Mahal (RSI Overbought)")
-
-    # 3. Volume - Bobot: 0.5
-    vol = curr.get('Volume', 0)
-    vol_ma = curr.get('Vol_ma_20', 1)
-    if vol > (1.2 * vol_ma):
-        score += 0.5
-        reasons.append("🚀 Volume Tinggi")
-
-    # 4. Candlestick - Bobot: 1.0 - 1.5
-    candle_score, candle_patterns = check_candlestick_patterns(curr, prev)
-    score += candle_score
-    if candle_patterns:
-        reasons.append(f"🕯️ Pola: {', '.join(candle_patterns)}")
-
+    if rsi < 35: score += 2; reasons.append("💎 Oversold (RSI)")
+    elif rsi > 70: score -= 2; reasons.append("⚠️ Overbought (RSI)")
+    
+    cmf = curr.get('CMF', 0)
+    if cmf > 0.1: score += 1; reasons.append("💰 Ada Akumulasi Bandar")
+    
     return score, reasons, curr
-
-# --- 8. FUNGSI TAMPILKAN LEGEND (PANDUAN) ---
-def show_legend():
-    with st.expander("📖 PANDUAN & LEGEND (Klik Disini)", expanded=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("### 🎯 Arti Skor AI")
-            st.info("""
-            * **Skor > 2.5 (STRONG BUY):** Sempurna. Trend naik + Murah + Volume.
-            * **Skor 1.5 - 2.5 (BUY):** Bagus. Memenuhi kriteria utama.
-            * **Skor 0.5 - 1.5 (HOLD):** Netral. Masuk watchlist.
-            * **Skor < 0 (AVOID):** Buruk/Mahal.
-            """)
-        with c2:
-            st.markdown("### 💡 Istilah")
-            st.write("""
-            * **RSI Oversold:** Barang diskon (Waktunya beli).
-            * **MACD Golden Cross:** Awal trend naik.
-            * **Hammer:** Pola lilin pembalikan arah (Bullish).
-            """)
 
 # --- 9. FITUR SCREENER ---
 def run_screener():
-    st.header("🔍 Smart Stock Screener")
-    show_legend()
+    st.header("🔍 Screener: Fundamental + Teknikal")
+    show_legend() # TAMPILKAN LEGEND DISINI
     
-    # Slider Sensitivitas
-    c_filter, c_btn = st.columns([3, 1])
-    with c_filter:
-        min_score = st.slider("Atur Ketatnya Seleksi (Minimal Skor)", 0.0, 4.0, 1.0, 0.5)
-    
-    if c_btn.button("SCAN SEKARANG"):
+    if st.button("MULAI SCANNING (Mode Lambat & Akurat)"):
         progress = st.progress(0)
+        status_text = st.empty()
         results = []
         tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
         
-        try:
-            # Download Data Bulk (Lebih Cepat)
-            data = yf.download(tickers, period="6mo", group_by='ticker', auto_adjust=True, progress=False, threads=True)
-            
-            for i, t in enumerate(tickers):
-                progress.progress((i+1)/len(tickers))
-                try:
-                    df = data[t].copy()
-                    df = fix_dataframe(df)
-                    if df.empty: continue
-                    
-                    df = calculate_technical(df)
-                    score, reasons, last_row = get_final_analysis(df)
-                    
-                    if score >= min_score: 
-                        rec = "STRONG BUY 🔥" if score >= 2.5 else "BUY ✅"
-                        if score < 1.5: rec = "WATCH 👀"
-                        
-                        results.append({
-                            "Kode": t.replace(".JK",""),
-                            "Harga": int(last_row['Close']),
-                            "Rekomendasi": rec,
-                            "Skor AI": score,
-                            "Alasan": ", ".join(reasons)
-                        })
-                except: continue
-        except Exception as e:
-            st.error("Gagal mengambil data. Coba refresh.")
+        data_price = yf.download(tickers, period="6mo", group_by='ticker', auto_adjust=True, progress=False, threads=True)
+        
+        total = len(tickers)
+        for i, t in enumerate(tickers):
+            status_text.text(f"Menganalisa Laporan Keuangan: {t} ...")
+            progress.progress((i+1)/total)
+            try:
+                # Teknikal
+                df = data_price[t].copy()
+                df = fix_dataframe(df)
+                if df.empty: continue
+                df = calculate_technical(df)
+                score_tec, reason_tec, last = score_technical(df)
+                
+                # Fundamental
+                fund_data = get_fundamental_info(t)
+                score_fund, reason_fund = score_fundamental(fund_data)
+                
+                # Rekomendasi
+                rec = "NEUTRAL"
+                if score_tec > 0 and score_fund > 3: rec = "💎 GEM"
+                elif score_tec > 1: rec = "📈 TRADING BUY"
+                elif score_fund > 4: rec = "🛡️ INVEST BUY"
+                
+                # Format
+                roe_disp = f"{fund_data['ROE']*100:.1f}%" if fund_data and fund_data['ROE'] else "-"
+                pbv_disp = f"{fund_data['PBV']:.2f}x" if fund_data and fund_data['PBV'] else "-"
+                per_disp = f"{fund_data['PER']:.1f}x" if fund_data and fund_data['PER'] else "-"
+                
+                results.append({
+                    "Kode": t.replace(".JK",""),
+                    "Harga": int(last['Close']),
+                    "Rek": rec,
+                    "Skor Tech": score_tec,
+                    "Skor Fund": score_fund,
+                    "ROE": roe_disp,
+                    "PBV": pbv_disp,
+                    "PER": per_disp,
+                    "Alasan": ", ".join(reason_fund)
+                })
+            except: continue
             
         progress.empty()
+        status_text.empty()
         
         if results:
-            st.success(f"Ditemukan {len(results)} Saham Pilihan!")
-            df_res = pd.DataFrame(results).sort_values("Skor AI", ascending=False)
-            
-            # Tampilkan Tabel dengan Warna (Butuh matplotlib di requirements.txt)
+            df_res = pd.DataFrame(results).sort_values("Skor Tech", ascending=False)
+            st.success(f"Selesai! Menampilkan {len(results)} saham.")
             try:
-                st.dataframe(
-                    df_res.style.background_gradient(subset=['Skor AI'], cmap='RdYlGn'),
-                    use_container_width=True
-                )
+                st.dataframe(df_res.style.background_gradient(subset=['Skor Tech', 'Skor Fund'], cmap='Greens'), use_container_width=True)
             except:
                 st.dataframe(df_res, use_container_width=True)
-                
-            st.caption("*Catat kode saham, lalu cek chart di menu sebelah kiri.*")
         else:
-            st.warning(f"Tidak ada saham dengan skor >= {min_score}. Coba geser slider ke kiri.")
+            st.warning("Gagal mengambil data.")
 
-# --- 10. FITUR CHART ---
+# --- 10. FITUR CHART DETAIL ---
 def show_chart():
-    st.header("📊 Detail Analisa Chart")
-    show_legend()
+    st.header("📊 Deep Dive Analysis")
+    show_legend() # TAMPILKAN LEGEND DISINI JUGA
     
-    col_input, col_info = st.columns([1, 2])
-    with col_input:
-        ticker = st.text_input("Ketik Kode Saham", "ANTM").upper()
-    
+    ticker = st.text_input("Kode Saham", "ADRO").upper()
     if ticker:
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
         
-        try:
-            df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
-            df = fix_dataframe(df)
-            df = calculate_technical(df)
+        df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
+        df = calculate_technical(df)
+        score_t, reasons_t, last = score_technical(df)
+        
+        fund = get_fundamental_info(symbol)
+        score_f, reasons_f = score_fundamental(fund)
+        
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Harga", f"Rp {int(last['Close']):,}")
+        c2.metric("Skor Teknikal", f"{score_t}/4", delta="Bagus" if score_t > 1 else "Jelek")
+        c3.metric("Skor Fundamental", f"{score_f}/8", delta="Bagus" if score_f > 4 else "Jelek")
+        
+        st.subheader("📑 Data Fundamental")
+        if fund:
+            f1, f2, f3, f4 = st.columns(4)
+            pbv, per, roe, der = fund.get('PBV'), fund.get('PER'), fund.get('ROE'), fund.get('DER')
             
-            if not df.empty:
-                score, reasons, last = get_final_analysis(df)
-                
-                # TAMPILAN SKOR BESAR
-                st.divider()
-                c1, c2, c3 = st.columns(3)
-                
-                # Perubahan Harga
-                change = 0
-                if len(df) > 1:
-                    prev_close = df.iloc[-2]['Close']
-                    change = ((last['Close'] - prev_close) / prev_close) * 100
-                
-                c1.metric("Harga Terakhir", f"Rp {int(last['Close']):,}", f"{change:.2f}%")
-                c2.metric("Skor AI", f"{score}/4.0")
-                c3.metric("Rekomendasi", "STRONG BUY 🔥" if score>=2.5 else ("BUY ✅" if score>=1.5 else "WAIT ✋"))
-                
-                st.write("**Alasan Analisa:**")
-                for r in reasons:
-                    st.write(f"- {r}")
-                
-                # CHART
-                st.subheader(f"Grafik {ticker}")
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
-                
-                # Candle
-                fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
-                
-                # Marker untuk Pola Candle
-                _, patterns = check_candlestick_patterns(df.iloc[-1], df.iloc[-2])
-                if patterns:
-                     fig.add_annotation(x=df.index[-1], y=df['High'].iloc[-1], text=patterns[0], showarrow=True, arrowhead=1)
+            f1.metric("PBV", f"{pbv:.2f}x" if pbv else "-", delta="Murah" if pbv and pbv<1 else None, delta_color="inverse")
+            f2.metric("PER", f"{per:.1f}x" if per else "-", delta="Cepat" if per and per<10 else None, delta_color="inverse")
+            f3.metric("ROE", f"{roe*100:.1f}%" if roe else "-", delta="Profit" if roe and roe>0.15 else None)
+            f4.metric("DER", f"{der:.1f}%" if der else "-", delta="Aman" if der and der<100 else "Bahaya", delta_color="inverse")
+        else: st.warning("Data Fundamental N/A")
 
-                # Indikator
-                if 'BBU_20_2.0' in df.columns:
-                    fig.add_trace(go.Scatter(x=df.index, y=df['BBU_20_2.0'], line=dict(color='gray', dash='dot', width=1), name='Upper BB'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df.index, y=df['BBL_20_2.0'], line=dict(color='gray', dash='dot', width=1), name='Lower BB'), row=1, col=1)
+        st.subheader("📈 Grafik")
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
+        colors = ['red' if row['Open'] - row['Close'] >= 0 else 'green' for index, row in df.iterrows()]
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
+        fig.update_layout(xaxis_rangeslider_visible=False, height=500)
+        st.plotly_chart(fig, use_container_width=True)
 
-                # Volume
-                colors = ['red' if row['Open'] - row['Close'] >= 0 else 'green' for index, row in df.iterrows()]
-                fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
-                
-                fig.update_layout(xaxis_rangeslider_visible=False, height=600, margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.error("Data tidak ditemukan atau koneksi bermasalah.")
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-# --- MAIN NAVIGATION ---
-st.sidebar.title("Menu Aplikasi")
-mode = st.sidebar.radio("Pilih Mode:", ["🔍 Screener (Cari Saham)", "📊 Detail Chart"])
-
-if mode == "🔍 Screener (Cari Saham)":
-    run_screener()
-else:
-    show_chart()
- 
+# --- MAIN ---
+mode = st.sidebar.radio("Mode:", ["🔍 Screener Lengkap", "📊 Detail Chart"])
+if mode == "🔍 Screener Lengkap": run_screener()
+else: show_chart()
