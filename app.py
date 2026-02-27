@@ -54,7 +54,7 @@ def get_fundamental_info(symbol):
         }
     except: return None
 
-# --- 6. FUNGSI DETEKSI CANDLESTICK (DIKEMBALIKAN!) ---
+# --- 6. FUNGSI DETEKSI CANDLESTICK (DENGAN SMART FILTER!) ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -64,16 +64,31 @@ def check_candlestick_patterns(curr, prev):
         upper = curr['High'] - max(curr['Close'], curr['Open'])
         lower = min(curr['Close'], curr['Open']) - curr['Low']
         
-        # Hammer (Palu)
-        if (lower > 2 * body) and (upper < body):
-            score += 1
-            patterns.append("🔨 Hammer")
+        # --- SMART FILTER LOGIC ---
+        # Ambil data RSI dan garis bawah Bollinger (BBL)
+        rsi = curr.get('Rsi', 50)
+        lower_bb = curr.get('BBL_20_2.0', 0)
+        
+        # Sinyal valid HANYA JIKA: RSI oversold (< 40) ATAU Harga menyentuh area Support Bollinger Band
+        # Kita beri toleransi 1% (1.01) agar menyentuh sedikit di atas garis tetap dianggap valid
+        is_valid_support = (rsi < 40) or (curr['Low'] <= lower_bb * 1.01)
 
-        # Bullish Engulfing
+        # 1. Hammer (Palu)
+        if (lower > 2 * body) and (upper < body):
+            if is_valid_support:
+                score += 1
+                patterns.append("🔨 Hammer (Valid/Support)")
+            else:
+                patterns.append("🔨 Hammer (Lemah/Sideways)") # Tidak menambah skor!
+
+        # 2. Bullish Engulfing
         if (prev['Close'] < prev['Open']) and (curr['Close'] > curr['Open']): 
             if (curr['Open'] < prev['Close']) and (curr['Close'] > prev['Open']):
-                score += 1.5
-                patterns.append("🦁 Engulfing")
+                if is_valid_support:
+                    score += 1.5
+                    patterns.append("🦁 Engulfing (Valid/Support)")
+                else:
+                    patterns.append("🦁 Engulfing (Lemah/Sideways)") # Tidak menambah skor!
     except: pass
     
     return score, patterns
@@ -90,16 +105,17 @@ def show_legend():
         with t3:
             st.warning("**RSI < 30:** Oversold (Waktunya Pantul). **MACD Cross:** Perubahan Tren.")
         with t4:
-            st.error("**Hammer:** Pola Palu (Sinyal Reversal). **Engulfing:** Candle hijau memakan merah (Sinyal Kuat).")
+            st.error("**Hammer/Engulfing (Valid):** Pola muncul di harga Support/Murah. Sinyal Kuat!\n**Hammer/Engulfing (Lemah):** Pola muncul di tengah pasar datar (Sideways). Abaikan.")
 
 # --- 8. LOGIKA PERHITUNGAN GABUNGAN (ALL METRICS) ---
 def calculate_metrics(df):
     df = fix_dataframe(df)
     try:
-        # Teknikal
+        # Teknikal & Bollinger Bands (Wajib untuk Smart Filter Candle)
         df['Rsi'] = df.ta.rsi(length=14)
         macd = df.ta.macd(fast=12, slow=26, signal=9)
-        df = pd.concat([df, macd], axis=1)
+        bbands = df.ta.bbands(length=20, std=2) # Ditambahkan untuk deteksi Support (Lower BB)
+        df = pd.concat([df, macd, bbands], axis=1)
         
         # Bandar (Money Flow)
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low'])) * df['Volume']
@@ -185,7 +201,7 @@ def run_screener():
                 if total_score >= 6: rec = "💎 STRONG BUY"
                 elif total_score >= 4: rec = "✅ BUY"
                 
-                # Masukkan hasil jika skor cukup bagus atau ada pola candle
+                # Masukkan hasil jika skor cukup bagus atau ada pola candle VALID (skor > 0)
                 if total_score >= 3 or s_candle > 0:
                     results.append({
                         "Kode": t.replace(".JK",""),
@@ -193,7 +209,7 @@ def run_screener():
                         "Rek": rec,
                         "Bandar": bandar_stat,
                         "Skor Fund": s_fund,
-                        "Skor Tech": s_tech + s_candle, # Gabung teknikal & candle
+                        "Skor Tech": s_tech + s_candle, 
                         "Alasan": ", ".join(reasons)
                     })
             except: continue
