@@ -139,7 +139,7 @@ def score_analysis(df, fund_data):
     if rsi < 35: score_tech += 2; reasons.append("💎 TEKNIKAL: Oversold (Murah)")
     elif rsi > 70: score_tech -= 1
     
-    # 3. FUNDAMENTAL (Skor max kembali ke 5, tanpa pengaruh Dividen)
+    # 3. FUNDAMENTAL
     if fund_data:
         pbv = fund_data.get('PBV')
         roe = fund_data.get('ROE')
@@ -189,17 +189,18 @@ def run_screener():
                 if total_score >= 6: rec = "💎 STRONG BUY"
                 elif total_score >= 4: rec = "✅ BUY"
                 
-                # Format Dividen murni sebagai informasi teks
+                # --- PERBAIKAN BUG DIVIDEN YIELD DI SINI ---
                 div_disp = "-"
-                if fund and fund.get('DivYield'):
-                    div_disp = f"{fund.get('DivYield')*100:.1f}%"
+                if fund and fund.get('DivYield') is not None:
+                    # * 100 DIHAPUS, DIBUAT 2 ANGKA DESIMAL (.2f)
+                    div_disp = f"{fund.get('DivYield'):.2f}%" 
                 
                 if total_score >= 3 or s_candle > 0:
                     results.append({
                         "Kode": t.replace(".JK",""),
                         "Harga": int(last['Close']),
                         "Rek": rec,
-                        "Dividen": div_disp, # Info dividen disematkan di sini
+                        "Dividen": div_disp, 
                         "Bandar": bandar_stat,
                         "Skor Fund": s_fund,
                         "Skor Tech": s_tech + s_candle, 
@@ -238,7 +239,6 @@ def show_chart():
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Harga", f"Rp {int(last['Close']):,}")
         
-        # Skor Fundamental kembali menggunakan basis /5
         c2.metric("Skor Fundamental", f"{s_fund}/5", help="Maksimal 5: Evaluasi dari PBV, ROE, dan DER")
         c3.metric("Skor Teknikal+Candle", f"{s_tech + s_candle}/4")
         
@@ -277,7 +277,8 @@ def show_chart():
         
         if fund:
             div_val = fund.get('DivYield')
-            div_str = f"{div_val*100:.1f}%" if div_val else "-"
+            # --- PERBAIKAN BUG DIVIDEN YIELD DI SINI JUGA ---
+            div_str = f"{div_val:.2f}%" if div_val is not None else "-" 
             st.caption(f"Data Fundamental: PBV {fund.get('PBV','-')}x | PER {fund.get('PER','-')}x | ROE {float(fund.get('ROE',0))*100:.1f}% | DER {fund.get('DER','-')}% | **Info Dividen: {div_str}**")
 
 # --- MAIN ---
