@@ -40,7 +40,7 @@ def fix_dataframe(df):
     df = df.loc[:, ~df.columns.duplicated()]
     return df
 
-# --- 5. FUNGSI FETCH FUNDAMENTAL (+ DIVIDEN) ---
+# --- 5. FUNGSI FETCH FUNDAMENTAL (+ INFO DIVIDEN) ---
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
@@ -51,7 +51,7 @@ def get_fundamental_info(symbol):
             "PER": info.get('trailingPE', None),
             "ROE": info.get('returnOnEquity', None), 
             "DER": info.get('debtToEquity', None),
-            "DivYield": info.get('dividendYield', None) # MENAMBAHKAN DIVIDEN
+            "DivYield": info.get('dividendYield', None) # Data dividen ditarik tapi tidak diskor
         }
     except: return None
 
@@ -69,7 +69,6 @@ def check_candlestick_patterns(curr, prev):
         lower_bb = curr.get('BBL_20_2.0', 0)
         is_valid_support = (rsi < 40) or (curr['Low'] <= lower_bb * 1.01)
 
-        # 1. Hammer
         if (lower > 2 * body) and (upper < body):
             if is_valid_support:
                 score += 1
@@ -77,7 +76,6 @@ def check_candlestick_patterns(curr, prev):
             else:
                 patterns.append("🔨 Hammer (Lemah/Sideways)")
 
-        # 2. Bullish Engulfing
         if (prev['Close'] < prev['Open']) and (curr['Close'] > curr['Open']): 
             if (curr['Open'] < prev['Close']) and (curr['Close'] > prev['Open']):
                 if is_valid_support:
@@ -95,7 +93,7 @@ def show_legend():
         t1, t2, t3, t4 = st.tabs(["🏛️ Fundamental", "💰 Bandar", "📈 Teknikal", "🕯️ Candle"])
         
         with t1:
-            st.info("**PBV < 1x:** Murah (Diskon).\n\n**ROE > 15%:** Profit Tinggi.\n\n**DER < 100%:** Utang Aman.\n\n**Dividen > 5%:** Gaji Pasif Besar (Mengalahkan Deposito).")
+            st.info("**PBV < 1x:** Murah (Diskon).\n\n**ROE > 15%:** Profit Tinggi.\n\n**DER < 100%:** Utang Aman.\n\n**Info Dividen:** Persentase imbal hasil per tahun (Hanya sebagai informasi tambahan).")
         with t2:
             st.success("**Akumulasi (CMF > 0):** Bandar sedang beli. **Distribusi (CMF < 0):** Bandar sedang jual.")
         with t3:
@@ -141,25 +139,15 @@ def score_analysis(df, fund_data):
     if rsi < 35: score_tech += 2; reasons.append("💎 TEKNIKAL: Oversold (Murah)")
     elif rsi > 70: score_tech -= 1
     
-    # 3. FUNDAMENTAL (+ DIVIDEN LOGIC)
+    # 3. FUNDAMENTAL (Skor max kembali ke 5, tanpa pengaruh Dividen)
     if fund_data:
         pbv = fund_data.get('PBV')
         roe = fund_data.get('ROE')
         der = fund_data.get('DER')
-        div = fund_data.get('DivYield') # Ambil nilai dividen
         
         if pbv and pbv < 1.5: score_fund += 2; reasons.append("🏛️ FUNDAMENTAL: Undervalue")
         if roe and roe > 0.15: score_fund += 2
         if der and der < 100: score_fund += 1
-        
-        # Logika Bonus Skor Dividen
-        if div:
-            if div >= 0.05: # Jika dividen di atas 5%
-                score_fund += 2
-                reasons.append(f"💸 DIVIDEN: Sangat Besar ({div*100:.1f}%)")
-            elif div >= 0.03: # Jika dividen di atas 3%
-                score_fund += 1
-                reasons.append(f"💵 DIVIDEN: Menarik ({div*100:.1f}%)")
         
     # 4. CANDLESTICK (Pattern)
     s_candle, patterns = check_candlestick_patterns(curr, prev)
@@ -192,19 +180,16 @@ def run_screener():
                 
                 s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
                 
-                # TOTAL SKOR
                 total_score = s_tech + s_fund + s_bandar + s_candle
                 
-                # Status Bandar
                 cmf = last.get('CMF', 0)
                 bandar_stat = "AKUMULASI 🐳" if cmf > 0.1 else ("DISTRIBUSI 🔻" if cmf < -0.1 else "Netral")
                 
-                # Rekomendasi
                 rec = "WAIT"
                 if total_score >= 6: rec = "💎 STRONG BUY"
                 elif total_score >= 4: rec = "✅ BUY"
                 
-                # Tampilkan dividen di tabel
+                # Format Dividen murni sebagai informasi teks
                 div_disp = "-"
                 if fund and fund.get('DivYield'):
                     div_disp = f"{fund.get('DivYield')*100:.1f}%"
@@ -214,7 +199,7 @@ def run_screener():
                         "Kode": t.replace(".JK",""),
                         "Harga": int(last['Close']),
                         "Rek": rec,
-                        "Dividen": div_disp, # TAMPILKAN KOLOM DIVIDEN
+                        "Dividen": div_disp, # Info dividen disematkan di sini
                         "Bandar": bandar_stat,
                         "Skor Fund": s_fund,
                         "Skor Tech": s_tech + s_candle, 
@@ -249,11 +234,12 @@ def show_chart():
         fund = get_fundamental_info(symbol)
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
         
-        # --- DASHBOARD METRICS ---
         st.divider()
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Harga", f"Rp {int(last['Close']):,}")
-        c2.metric("Skor Fundamental", f"{s_fund}/7", help="Maksimal 7 (Termasuk Bonus Dividen)")
+        
+        # Skor Fundamental kembali menggunakan basis /5
+        c2.metric("Skor Fundamental", f"{s_fund}/5", help="Maksimal 5: Evaluasi dari PBV, ROE, dan DER")
         c3.metric("Skor Teknikal+Candle", f"{s_tech + s_candle}/4")
         
         cmf_val = last.get('CMF', 0)
@@ -266,7 +252,6 @@ def show_chart():
         
         st.info(f"**Kesimpulan AI:** {', '.join(reasons)}")
         
-        # --- CHART 3 BARIS ---
         st.subheader(f"Visualisasi {ticker}")
         
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
@@ -293,7 +278,7 @@ def show_chart():
         if fund:
             div_val = fund.get('DivYield')
             div_str = f"{div_val*100:.1f}%" if div_val else "-"
-            st.caption(f"Data Fundamental: PBV {fund.get('PBV','-')}x | PER {fund.get('PER','-')}x | ROE {float(fund.get('ROE',0))*100:.1f}% | DER {fund.get('DER','-')}% | **DIVIDEN {div_str}**")
+            st.caption(f"Data Fundamental: PBV {fund.get('PBV','-')}x | PER {fund.get('PER','-')}x | ROE {float(fund.get('ROE',0))*100:.1f}% | DER {fund.get('DER','-')}% | **Info Dividen: {div_str}**")
 
 # --- MAIN ---
 mode = st.sidebar.radio("Pilih Mode:", ["🔍 Ultimate Screener", "📊 Chart Detail"])
