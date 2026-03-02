@@ -40,7 +40,7 @@ def fix_dataframe(df):
     df = df.loc[:, ~df.columns.duplicated()]
     return df
 
-# --- 5. FUNGSI FETCH FUNDAMENTAL ---
+# --- 5. FUNGSI FETCH FUNDAMENTAL (+ DIVIDEN) ---
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
@@ -50,11 +50,12 @@ def get_fundamental_info(symbol):
             "PBV": info.get('priceToBook', None),
             "PER": info.get('trailingPE', None),
             "ROE": info.get('returnOnEquity', None), 
-            "DER": info.get('debtToEquity', None),   
+            "DER": info.get('debtToEquity', None),
+            "DivYield": info.get('dividendYield', None) # MENAMBAHKAN DIVIDEN
         }
     except: return None
 
-# --- 6. FUNGSI DETEKSI CANDLESTICK (DENGAN SMART FILTER!) ---
+# --- 6. FUNGSI DETEKSI CANDLESTICK ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -64,22 +65,17 @@ def check_candlestick_patterns(curr, prev):
         upper = curr['High'] - max(curr['Close'], curr['Open'])
         lower = min(curr['Close'], curr['Open']) - curr['Low']
         
-        # --- SMART FILTER LOGIC ---
-        # Ambil data RSI dan garis bawah Bollinger (BBL)
         rsi = curr.get('Rsi', 50)
         lower_bb = curr.get('BBL_20_2.0', 0)
-        
-        # Sinyal valid HANYA JIKA: RSI oversold (< 40) ATAU Harga menyentuh area Support Bollinger Band
-        # Kita beri toleransi 1% (1.01) agar menyentuh sedikit di atas garis tetap dianggap valid
         is_valid_support = (rsi < 40) or (curr['Low'] <= lower_bb * 1.01)
 
-        # 1. Hammer (Palu)
+        # 1. Hammer
         if (lower > 2 * body) and (upper < body):
             if is_valid_support:
                 score += 1
                 patterns.append("🔨 Hammer (Valid/Support)")
             else:
-                patterns.append("🔨 Hammer (Lemah/Sideways)") # Tidak menambah skor!
+                patterns.append("🔨 Hammer (Lemah/Sideways)")
 
         # 2. Bullish Engulfing
         if (prev['Close'] < prev['Open']) and (curr['Close'] > curr['Open']): 
@@ -88,7 +84,7 @@ def check_candlestick_patterns(curr, prev):
                     score += 1.5
                     patterns.append("🦁 Engulfing (Valid/Support)")
                 else:
-                    patterns.append("🦁 Engulfing (Lemah/Sideways)") # Tidak menambah skor!
+                    patterns.append("🦁 Engulfing (Lemah/Sideways)")
     except: pass
     
     return score, patterns
@@ -99,7 +95,7 @@ def show_legend():
         t1, t2, t3, t4 = st.tabs(["🏛️ Fundamental", "💰 Bandar", "📈 Teknikal", "🕯️ Candle"])
         
         with t1:
-            st.info("**PBV < 1x:** Murah (Diskon). **ROE > 15%:** Profit Tinggi. **DER < 100%:** Utang Aman.")
+            st.info("**PBV < 1x:** Murah (Diskon).\n\n**ROE > 15%:** Profit Tinggi.\n\n**DER < 100%:** Utang Aman.\n\n**Dividen > 5%:** Gaji Pasif Besar (Mengalahkan Deposito).")
         with t2:
             st.success("**Akumulasi (CMF > 0):** Bandar sedang beli. **Distribusi (CMF < 0):** Bandar sedang jual.")
         with t3:
@@ -107,17 +103,15 @@ def show_legend():
         with t4:
             st.error("**Hammer/Engulfing (Valid):** Pola muncul di harga Support/Murah. Sinyal Kuat!\n**Hammer/Engulfing (Lemah):** Pola muncul di tengah pasar datar (Sideways). Abaikan.")
 
-# --- 8. LOGIKA PERHITUNGAN GABUNGAN (ALL METRICS) ---
+# --- 8. LOGIKA PERHITUNGAN GABUNGAN ---
 def calculate_metrics(df):
     df = fix_dataframe(df)
     try:
-        # Teknikal & Bollinger Bands (Wajib untuk Smart Filter Candle)
         df['Rsi'] = df.ta.rsi(length=14)
         macd = df.ta.macd(fast=12, slow=26, signal=9)
-        bbands = df.ta.bbands(length=20, std=2) # Ditambahkan untuk deteksi Support (Lower BB)
+        bbands = df.ta.bbands(length=20, std=2)
         df = pd.concat([df, macd, bbands], axis=1)
         
-        # Bandar (Money Flow)
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low'])) * df['Volume']
         df['CMF'] = ad.fillna(0).rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
     except: pass
@@ -143,20 +137,29 @@ def score_analysis(df, fund_data):
         
     # 2. TEKNIKAL (MACD & RSI)
     if curr.get('MACD_12_26_9', 0) > curr.get('MACDs_12_26_9', 0): score_tech += 1
-    
     rsi = curr.get('Rsi', 50)
     if rsi < 35: score_tech += 2; reasons.append("💎 TEKNIKAL: Oversold (Murah)")
     elif rsi > 70: score_tech -= 1
     
-    # 3. FUNDAMENTAL
+    # 3. FUNDAMENTAL (+ DIVIDEN LOGIC)
     if fund_data:
         pbv = fund_data.get('PBV')
         roe = fund_data.get('ROE')
         der = fund_data.get('DER')
+        div = fund_data.get('DivYield') # Ambil nilai dividen
         
         if pbv and pbv < 1.5: score_fund += 2; reasons.append("🏛️ FUNDAMENTAL: Undervalue")
         if roe and roe > 0.15: score_fund += 2
         if der and der < 100: score_fund += 1
+        
+        # Logika Bonus Skor Dividen
+        if div:
+            if div >= 0.05: # Jika dividen di atas 5%
+                score_fund += 2
+                reasons.append(f"💸 DIVIDEN: Sangat Besar ({div*100:.1f}%)")
+            elif div >= 0.03: # Jika dividen di atas 3%
+                score_fund += 1
+                reasons.append(f"💵 DIVIDEN: Menarik ({div*100:.1f}%)")
         
     # 4. CANDLESTICK (Pattern)
     s_candle, patterns = check_candlestick_patterns(curr, prev)
@@ -168,7 +171,7 @@ def score_analysis(df, fund_data):
 
 # --- 9. FITUR SCREENER ---
 def run_screener():
-    st.header("🔍 Ultimate Screener (4 Pilar Analisa)")
+    st.header("🔍 Ultimate Screener (Fund + Tech + Bandar + Candle)")
     show_legend()
     
     if st.button("MULAI SCANNING"):
@@ -189,7 +192,7 @@ def run_screener():
                 
                 s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
                 
-                # TOTAL SKOR (Gabungan 4 Pilar)
+                # TOTAL SKOR
                 total_score = s_tech + s_fund + s_bandar + s_candle
                 
                 # Status Bandar
@@ -201,12 +204,17 @@ def run_screener():
                 if total_score >= 6: rec = "💎 STRONG BUY"
                 elif total_score >= 4: rec = "✅ BUY"
                 
-                # Masukkan hasil jika skor cukup bagus atau ada pola candle VALID (skor > 0)
+                # Tampilkan dividen di tabel
+                div_disp = "-"
+                if fund and fund.get('DivYield'):
+                    div_disp = f"{fund.get('DivYield')*100:.1f}%"
+                
                 if total_score >= 3 or s_candle > 0:
                     results.append({
                         "Kode": t.replace(".JK",""),
                         "Harga": int(last['Close']),
                         "Rek": rec,
+                        "Dividen": div_disp, # TAMPILKAN KOLOM DIVIDEN
                         "Bandar": bandar_stat,
                         "Skor Fund": s_fund,
                         "Skor Tech": s_tech + s_candle, 
@@ -232,7 +240,7 @@ def show_chart():
     st.header("📊 Deep Analysis Chart")
     show_legend()
     
-    ticker = st.text_input("Kode Saham", "BRPT").upper()
+    ticker = st.text_input("Kode Saham", "ADRO").upper()
     if ticker:
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
         
@@ -245,7 +253,7 @@ def show_chart():
         st.divider()
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Harga", f"Rp {int(last['Close']):,}")
-        c2.metric("Skor Fundamental", f"{s_fund}/5")
+        c2.metric("Skor Fundamental", f"{s_fund}/7", help="Maksimal 7 (Termasuk Bonus Dividen)")
         c3.metric("Skor Teknikal+Candle", f"{s_tech + s_candle}/4")
         
         cmf_val = last.get('CMF', 0)
@@ -266,19 +274,15 @@ def show_chart():
                             vertical_spacing=0.05,
                             subplot_titles=("Harga & Candle", "Volume", "Bandar Flow (CMF)"))
         
-        # 1. Harga & Pola Candle
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
         
-        # Penanda Pola Candle di Chart (Fitur yang dikembalikan)
         _, patterns = check_candlestick_patterns(df.iloc[-1], df.iloc[-2])
         if patterns:
              fig.add_annotation(x=df.index[-1], y=df['High'].iloc[-1], text=patterns[0], showarrow=True, arrowhead=1, row=1, col=1)
         
-        # 2. Volume
         colors_vol = ['red' if r['Open'] - r['Close'] >= 0 else 'green' for i, r in df.iterrows()]
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors_vol, name='Volume'), row=2, col=1)
         
-        # 3. Bandar Flow
         cmf_colors = ['green' if v >= 0 else 'red' for v in df['CMF']]
         fig.add_trace(go.Bar(x=df.index, y=df['CMF'], marker_color=cmf_colors, name='Money Flow'), row=3, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="black", row=3, col=1)
@@ -287,7 +291,9 @@ def show_chart():
         st.plotly_chart(fig, use_container_width=True)
         
         if fund:
-            st.caption(f"Data Fundamental: PBV {fund.get('PBV','-')}x | PER {fund.get('PER','-')}x | ROE {float(fund.get('ROE',0))*100:.1f}% | DER {fund.get('DER','-')}%")
+            div_val = fund.get('DivYield')
+            div_str = f"{div_val*100:.1f}%" if div_val else "-"
+            st.caption(f"Data Fundamental: PBV {fund.get('PBV','-')}x | PER {fund.get('PER','-')}x | ROE {float(fund.get('ROE',0))*100:.1f}% | DER {fund.get('DER','-')}% | **DIVIDEN {div_str}**")
 
 # --- MAIN ---
 mode = st.sidebar.radio("Pilih Mode:", ["🔍 Ultimate Screener", "📊 Chart Detail"])
