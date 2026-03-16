@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 import numpy as np
-import time  # DITAMBAHKAN UNTUK JEDA ANTI-BLOKIR API
+import time
 
 # --- 1. KONFIGURASI HALAMAN & API KEY ---
 st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", page_icon="🏦")
@@ -14,17 +14,32 @@ st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", pag
 # KUNCI RAHASIA GOAPI ANDA
 GOAPI_KEY = "d63f23fe-bab5-516f-e0a7-c3b0f3ee"
 
-# --- 2. CSS FIX (TAMPILAN DARK MODE) ---
+# --- 2. CSS FIX (TAMPILAN METRIC AGAR TIDAK TERPOTONG) ---
 st.markdown("""
 <style>
     [data-testid="stMetric"] {
         background-color: #f0f2f6 !important;
         border: 1px solid #d6d6d6 !important;
-        padding: 10px !important;
+        padding: 15px !important;
         border-radius: 10px !important;
+        height: 100% !important; /* Memaksa tinggi kotak menyesuaikan isi */
     }
-    [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; }
-    [data-testid="stMetricValue"] div { color: #000000 !important; }
+    [data-testid="stMetricLabel"] p { 
+        color: #31333F !important; 
+        font-weight: bold !important; 
+        font-size: 1rem !important; 
+        white-space: normal !important;
+    }
+    [data-testid="stMetricValue"] div { 
+        color: #000000 !important; 
+        font-size: 1.3rem !important; /* Ukuran huruf dikecilkan sedikit */
+        white-space: normal !important; /* Teks diizinkan turun ke baris baru */
+        line-height: 1.2 !important;
+    }
+    [data-testid="stMetricDelta"] div { 
+        font-size: 1rem !important; 
+        white-space: normal !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -55,10 +70,14 @@ def format_rupiah(angka):
     else: formatted = f"Rp {angka:,.0f}"
     return f"-{formatted}" if is_negative else formatted
 
-# --- 5. FUNGSI FETCH GOAPI (TRUE BANDARMOLOGY & RISK) ---
+# --- 5. FUNGSI FETCH GOAPI (ANTI-BLOKIR & DEBUGGING) ---
 def fetch_goapi_data(symbol, target_date):
-    """Mengambil Data Suspend, Notasi, dan Arus Dana Asing dari GOAPI"""
-    headers = {'accept': 'application/json', 'X-API-KEY': GOAPI_KEY}
+    """Mengambil Data Suspend, Notasi, dan Arus Dana Asing dari GOAPI dengan Topeng Browser"""
+    headers = {
+        'accept': 'application/json', 
+        'X-API-KEY': GOAPI_KEY,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
     is_suspended = False
     notasi = ""
@@ -67,25 +86,37 @@ def fetch_goapi_data(symbol, target_date):
     # 1. Cek Profil & Risiko (Suspend/Notasi)
     try:
         url_prof = f"https://api.goapi.io/stock/idx/{symbol}/profile"
-        res_prof = requests.get(url_prof, headers=headers).json()
-        if res_prof.get('status') == 'success':
-            data_prof = res_prof['data']
+        res_prof = requests.get(url_prof, headers=headers, timeout=10)
+        
+        if res_prof.status_code != 200:
+            st.sidebar.error(f"GOAPI Profil Ditolak ({res_prof.status_code}): {res_prof.text[:50]}")
+            
+        res_prof_json = res_prof.json()
+        if res_prof_json.get('status') == 'success':
+            data_prof = res_prof_json['data']
             is_suspended = data_prof.get('is_suspended', False)
             notes = data_prof.get('special_notations', [])
             if notes: notasi = ", ".join(notes)
-    except: pass
+    except Exception as e: 
+        st.sidebar.error(f"Error Sistem Profil {symbol}: {e}")
 
     # 2. Cek Foreign Flow (Arus Asing)
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
-        res_broker = requests.get(url_broker, headers=headers).json()
-        if res_broker.get('status') == 'success':
-            for broker in res_broker['data']['results']:
+        res_broker = requests.get(url_broker, headers=headers, timeout=10)
+        
+        if res_broker.status_code != 200:
+            st.sidebar.error(f"GOAPI Broker Ditolak ({res_broker.status_code}): {res_broker.text[:50]}")
+            
+        res_broker_json = res_broker.json()
+        if res_broker_json.get('status') == 'success':
+            for broker in res_broker_json['data']['results']:
                 if broker['side'] == 'BUY':
                     net_foreign += broker['value']
                 elif broker['side'] == 'SELL':
                     net_foreign -= broker['value']
-    except: pass
+    except Exception as e: 
+        st.sidebar.error(f"Error Sistem Broker {symbol}: {e}")
 
     return is_suspended, notasi, net_foreign
 
@@ -199,7 +230,7 @@ def score_analysis(df, fund_data):
 # --- 8. FITUR SCREENER (SUPER FILTER GOAPI) ---
 def run_screener():
     st.header("🔍 GOAPI Super Screener (Foreign Flow & Wyckoff)")
-    st.info("Screener ini memiliki Filter Berlapis: Membuang saham Suspend, Sepi Likuiditas, dan Distribusi Asing.")
+    st.info("Filter Asing sedang dimatikan sementara untuk keperluan uji coba/debugging.")
     
     if st.button("MULAI SCANNING (Sabar ya, Jeda Anti-Blokir aktif...)"):
         progress = st.progress(0)
@@ -213,7 +244,7 @@ def run_screener():
             status.text(f"Analisa Lapis 1 (GOAPI): {t} ...")
             progress.progress((i+1)/len(tickers))
             
-            # === TAMBAHAN JEDA ANTI BLOKIR (1 DETIK) ===
+            # JEDA 1 DETIK AGAR TIDAK SPAM SERVER
             time.sleep(1)
             
             try:
@@ -221,23 +252,21 @@ def run_screener():
                 df = fix_dataframe(df)
                 if df.empty or len(df) < 20: continue
                 
-                # Cek Likuiditas (Abaikan jika volume hari ini di bawah 5 juta lembar)
                 vol_hari_ini = df['Volume'].iloc[-1]
                 if vol_hari_ini < 5000000: continue
                 
-                # Cek GOAPI: Suspend, Notasi, & Foreign Flow
                 symbol_only = t.replace(".JK", "")
                 last_date = df.index[-1].strftime('%Y-%m-%d')
                 
                 is_suspended, notasi, net_foreign = fetch_goapi_data(symbol_only, last_date)
                 
-                # FILTER 1: Buang Saham Bermasalah
+                # FILTER 1: Buang Saham Bermasalah (Suspend/Notasi)
                 if is_suspended or notasi != "": continue
                 
-                # FILTER 2: Buang Jika Asing Keluar (Net Sell) atau Nol
-                if net_foreign <= 0: continue
+                # FILTER 2: ASING KELUAR (SAAT INI SEDANG DIBYPASS DENGAN TANDA #)
+                # Jika ingin filter asing diaktifkan lagi, hapus tanda # di bawah ini:
+                # if net_foreign <= 0: continue
                 
-                # JIKA LOLOS FILTER GOAPI, LANJUT ANALISA TEKNIKAL
                 df = calculate_metrics(df)
                 fund = get_fundamental_info(t)
                 s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
@@ -245,24 +274,22 @@ def run_screener():
                 
                 total_score = s_tech + s_fund + s_bandar + s_candle
                 
-                # Rekomendasi
                 rec = "WAIT"
                 if total_score >= 6 or "BULLISH DIV" in divergence: rec = "💎 STRONG BUY"
                 elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
                 
-                # === FIX BUG DIVIDEN (* 100 DIHAPUS) ===
+                # DIVIDEN: FORMAT DESIMAL YANG BENAR (Tanpa * 100)
                 div_disp = "-"
                 if fund and fund.get('DivYield') is not None:
                     div_disp = f"{fund.get('DivYield'):.2f}%" 
                 
-                # Tambahkan keterangan Asing di alasan
-                reasons.append(f"🌐 ASING MASUK: {format_rupiah(net_foreign)}")
+                reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}")
 
                 if total_score >= 2 or "BULLISH DIV" in divergence or "Accumulation" in wyckoff_phase:
                     results.append({
                         "Kode": symbol_only,
                         "Harga": int(last['Close']),
-                        "Wyckoff": wyckoff_phase.split(" ")[1],
+                        "Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
                         "Net Foreign (Rp)": format_rupiah(net_foreign),
                         "ER (Trend)": f"{er_val:.2f}",
                         "Rek": rec,
@@ -278,12 +305,12 @@ def run_screener():
         
         if results:
             df_res = pd.DataFrame(results).sort_values(by=["Skor Tech", "Wyckoff"], ascending=[False, False])
-            st.success(f"Selesai! {len(results)} Saham Berkualitas (Asing Akumulasi) Ditemukan.")
+            st.success(f"Selesai! {len(results)} Saham Ditemukan.")
             st.dataframe(df_res, use_container_width=True)
         else:
-            st.warning("Data kosong. Asing sedang keluar dari pasar / Semua saham tidak masuk kriteria (Wait & See).")
+            st.warning("Data kosong / Semua saham tidak masuk kriteria teknikal.")
 
-# --- 9. FITUR CHART DETAIL (DENGAN STATUS GOAPI) ---
+# --- 9. FITUR CHART DETAIL (DENGAN STATUS GOAPI & UI FIX) ---
 def show_chart():
     st.header("📊 Deep Analysis & Foreign Flow Chart")
     
@@ -298,25 +325,23 @@ def show_chart():
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
         wyckoff_phase, divergence, er_val = advanced_analysis(df)
         
-        # Tarik data GOAPI
         last_date = df.index[-1].strftime('%Y-%m-%d')
         is_suspended, notasi, net_foreign = fetch_goapi_data(ticker_only, last_date)
         
-        # --- PERINGATAN RISIKO GOAPI ---
         if is_suspended:
             st.error("🚨 SAHAM INI SEDANG DI-SUSPEND OLEH BURSA EFEK INDONESIA!")
         if notasi:
             st.warning(f"⚠️ Perhatian! Saham ini memiliki Notasi Khusus dari BEI: {notasi}")
             
         st.divider()
-        # --- TOP METRICS ---
+        
+        # --- TOP METRICS (UI SUDAH DIPERBAIKI) ---
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Harga Terakhir", f"Rp {int(last['Close']):,}")
-        c2.metric("Fase Wyckoff", wyckoff_phase.split(" ")[0] + " " + wyckoff_phase.split(" ")[1])
+        c2.metric("Fase Wyckoff", wyckoff_phase)
         
-        # Metric Net Foreign Baru!
-        foreign_label = "🟢 ASING AKUMULASI" if net_foreign > 0 else ("🔴 ASING DISTRIBUSI" if net_foreign < 0 else "⚪ ASING NETRAL")
-        c3.metric("Foreign Flow (Hari Terakhir)", foreign_label, format_rupiah(net_foreign), delta_color="normal" if net_foreign > 0 else "inverse")
+        foreign_label = "🟢 AKUMULASI" if net_foreign > 0 else ("🔴 DISTRIBUSI" if net_foreign < 0 else "⚪ NETRAL")
+        c3.metric("Foreign Flow (Harian)", foreign_label, format_rupiah(net_foreign), delta_color="normal" if net_foreign > 0 else "inverse")
         
         er_status = "Trending 🚀" if er_val > 0.3 else ("Choppy/Sideways 💤" if er_val < 0.2 else "Netral")
         c4.metric("Trend Quality (ER)", f"{er_val:.2f}", delta=er_status, delta_color="normal" if er_val > 0.3 else "off")
@@ -354,4 +379,4 @@ def show_chart():
 # --- MAIN ---
 mode = st.sidebar.radio("Pilih Menu:", ["🔍 GOAPI Super Screener", "📊 Advanced Chart (Asing Tracker)"])
 if mode == "🔍 GOAPI Super Screener": run_screener()
-else: show_chart() 
+else: show_chart()
