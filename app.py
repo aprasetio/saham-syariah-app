@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 import numpy as np
+import time  # DITAMBAHKAN UNTUK JEDA ANTI-BLOKIR API
 
 # --- 1. KONFIGURASI HALAMAN & API KEY ---
 st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", page_icon="🏦")
@@ -200,7 +201,7 @@ def run_screener():
     st.header("🔍 GOAPI Super Screener (Foreign Flow & Wyckoff)")
     st.info("Screener ini memiliki Filter Berlapis: Membuang saham Suspend, Sepi Likuiditas, dan Distribusi Asing.")
     
-    if st.button("MULAI SCANNING (Mode Ketat)"):
+    if st.button("MULAI SCANNING (Sabar ya, Jeda Anti-Blokir aktif...)"):
         progress = st.progress(0)
         status = st.empty()
         results = []
@@ -211,6 +212,9 @@ def run_screener():
         for i, t in enumerate(tickers):
             status.text(f"Analisa Lapis 1 (GOAPI): {t} ...")
             progress.progress((i+1)/len(tickers))
+            
+            # === TAMBAHAN JEDA ANTI BLOKIR (1 DETIK) ===
+            time.sleep(1)
             
             try:
                 df = price_data[t].copy()
@@ -230,8 +234,8 @@ def run_screener():
                 # FILTER 1: Buang Saham Bermasalah
                 if is_suspended or notasi != "": continue
                 
-                # FILTER 2: Buang Jika Asing Keluar (Net Sell)
-                if net_foreign < 0: continue
+                # FILTER 2: Buang Jika Asing Keluar (Net Sell) atau Nol
+                if net_foreign <= 0: continue
                 
                 # JIKA LOLOS FILTER GOAPI, LANJUT ANALISA TEKNIKAL
                 df = calculate_metrics(df)
@@ -246,9 +250,10 @@ def run_screener():
                 if total_score >= 6 or "BULLISH DIV" in divergence: rec = "💎 STRONG BUY"
                 elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
                 
+                # === FIX BUG DIVIDEN (* 100 DIHAPUS) ===
                 div_disp = "-"
                 if fund and fund.get('DivYield') is not None:
-                    div_disp = f"{fund.get('DivYield')*100:.1f}%" # Fix Persentase
+                    div_disp = f"{fund.get('DivYield'):.2f}%" 
                 
                 # Tambahkan keterangan Asing di alasan
                 reasons.append(f"🌐 ASING MASUK: {format_rupiah(net_foreign)}")
