@@ -8,13 +8,53 @@ import requests
 import numpy as np
 import time
 
-# --- 1. KONFIGURASI HALAMAN & API KEY ---
+# --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", page_icon="🏦")
 
-# KUNCI RAHASIA GOAPI ANDA
-GOAPI_KEY = "d63f23fe-bab5-516f-e0a7-c3b0f3ee"
+# --- 2. SISTEM LOGIN AMAN (STREAMLIT SECRETS) ---
+def check_password():
+    """Mengembalikan True jika user sudah login, False jika belum."""
+    def password_entered():
+        # Cek apakah username ada di brankas st.secrets["passwords"] dan passwordnya cocok
+        if st.session_state["username"] in st.secrets["passwords"] and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Hapus password dari memori demi keamanan
+        else:
+            st.session_state["password_correct"] = False
 
-# --- 2. CSS FIX ---
+    if "password_correct" not in st.session_state:
+        # Jika belum pernah coba login, tampilkan form
+        st.markdown("<h1 style='text-align: center;'>🔒 Gerbang Keamanan</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center;'>Aplikasi ini hanya untuk kalangan terbatas.</p>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.text_input("Username", key="username")
+            st.text_input("Password", type="password", key="password")
+            st.button("Login", on_click=password_entered, use_container_width=True)
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        # Jika salah password, tampilkan form lagi dengan pesan error
+        st.markdown("<h1 style='text-align: center;'>🔒 Gerbang Keamanan</h1>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.text_input("Username", key="username")
+            st.text_input("Password", type="password", key="password")
+            st.button("Login", on_click=password_entered, use_container_width=True)
+            st.error("🚫 Username tidak dikenal atau Password salah!")
+        return False
+    else:
+        # Jika berhasil login, kembalikan True untuk melanjutkan aplikasi
+        return True
+
+# HENTIKAN APLIKASI DI SINI JIKA BELUM LOGIN
+if not check_password():
+    st.stop()
+
+# --- 3. AMBIL API KEY DARI BRANKAS (SANGAT AMAN) ---
+GOAPI_KEY = st.secrets["GOAPI_KEY"]
+
+# --- 4. CSS FIX ---
 st.markdown("""
 <style>
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
@@ -24,7 +64,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DAFTAR SAHAM (JII 30) ---
+# --- 5. DAFTAR SAHAM (JII 30) ---
 SHARIA_STOCKS = [
     "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
     "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
@@ -32,7 +72,7 @@ SHARIA_STOCKS = [
     "AMRT", "ASII", "TPIA"
 ]
 
-# --- 4. HELPER FUNCTIONS ---
+# --- 6. HELPER FUNCTIONS ---
 def fix_dataframe(df):
     if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -51,38 +91,28 @@ def format_rupiah(angka):
     else: formatted = f"Rp {angka:,.0f}"
     return f"-{formatted}" if is_negative else formatted
 
-# --- 5. FUNGSI FETCH GOAPI (DIOPTIMALKAN & DIBERI CACHE) ---
-# Cache di-set 12 jam (43200 detik). Agar jika di-klik 2x, kuota tidak berkurang.
+# --- 7. FUNGSI FETCH GOAPI (DIOPTIMALKAN & DIBERI CACHE) ---
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
-    """Hanya mengambil data Foreign Flow untuk menghemat kuota limit 30"""
     headers = {
         'accept': 'application/json', 
         'X-API-KEY': GOAPI_KEY,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     net_foreign = 0
-    
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
-        
-        if res_broker.status_code != 200:
-            return None # Kembalikan None jika kena limit 429
-            
+        if res_broker.status_code != 200: return None 
         res_broker_json = res_broker.json()
         if res_broker_json.get('status') == 'success':
             for broker in res_broker_json['data']['results']:
-                if broker['side'] == 'BUY':
-                    net_foreign += broker['value']
-                elif broker['side'] == 'SELL':
-                    net_foreign -= broker['value']
-    except Exception as e: 
-        return None
-
+                if broker['side'] == 'BUY': net_foreign += broker['value']
+                elif broker['side'] == 'SELL': net_foreign -= broker['value']
+    except Exception as e: return None
     return net_foreign
 
-# --- 6. FUNGSI FETCH FUNDAMENTAL (YAHOO) ---
+# --- 8. FUNGSI FETCH FUNDAMENTAL (YAHOO) ---
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
@@ -97,7 +127,7 @@ def get_fundamental_info(symbol):
         }
     except: return None
 
-# --- 7. FUNGSI TEKNIKAL & WYCKOFF ---
+# --- 9. FUNGSI TEKNIKAL & WYCKOFF ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -105,7 +135,6 @@ def check_candlestick_patterns(curr, prev):
         body = abs(curr['Close'] - curr['Open'])
         upper = curr['High'] - max(curr['Close'], curr['Open'])
         lower = min(curr['Close'], curr['Open']) - curr['Low']
-        
         rsi = curr.get('Rsi', 50)
         lower_bb = curr.get('BBL_20_2.0', 0)
         is_valid_support = (rsi < 40) or (curr['Low'] <= lower_bb * 1.01)
@@ -187,7 +216,7 @@ def score_analysis(df, fund_data):
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
-# --- 8. FITUR SCREENER ---
+# --- 10. FITUR SCREENER ---
 def run_screener(use_goapi):
     st.header("🔍 Smart Money Screener (Optimized)")
     if use_goapi:
@@ -213,7 +242,6 @@ def run_screener(use_goapi):
                 if df.empty or len(df) < 20: continue
                 if df['Volume'].iloc[-1] < 5000000: continue
                 
-                # --- FASE 1: UJI TEKNIKAL DULU (GRATIS) ---
                 df = calculate_metrics(df)
                 fund = get_fundamental_info(t)
                 s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
@@ -224,21 +252,17 @@ def run_screener(use_goapi):
                 if total_score >= 6 or "BULLISH DIV" in divergence: rec = "💎 STRONG BUY"
                 elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
                 
-                # JIKA TEKNIKAL JELEK, LANGSUNG BUANG (JANGAN CEK GOAPI)
                 if total_score < 3 and "BULLISH DIV" not in divergence and "Accumulation" not in wyckoff_phase:
                     continue
                 
-                # --- FASE 2: KONFIRMASI GOAPI (HANYA UNTUK SAHAM TERPILIH) ---
                 symbol_only = t.replace(".JK", "")
                 net_foreign = None
                 
                 if use_goapi:
                     status.text(f"Analisa Lapis 2 (GOAPI - Cek Asing): {t} ...")
-                    time.sleep(1) # Jeda aman
+                    time.sleep(1) 
                     last_date = df.index[-1].strftime('%Y-%m-%d')
                     net_foreign = fetch_goapi_foreign_flow(symbol_only, last_date)
-                    
-                    # Jika data asing ada, dan ternyata asing jualan, buang sahamnya!
                     if net_foreign is not None and net_foreign <= 0: continue
                 
                 div_disp = "-"
@@ -272,12 +296,19 @@ def run_screener(use_goapi):
         else:
             st.warning("Data kosong / Tidak ada saham yang masuk kriteria.")
 
-# --- 9. FITUR CHART DETAIL ---
+# --- 11. FITUR CHART DETAIL ---
 def show_chart(use_goapi):
     st.header("📊 Deep Analysis & Tracker")
     
-    ticker = st.text_input("Kode Saham", "BBRI").upper()
-    if ticker:
+    with st.form(key='chart_search_form'):
+        c_input, c_btn = st.columns([4, 1])
+        with c_input:
+            ticker = st.text_input("Masukkan Kode Saham (Contoh: BBRI, TLKM, ADRO)", "").upper()
+        with c_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_search = st.form_submit_button("Cari Saham 🔍")
+            
+    if submit_search and ticker:
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
         ticker_only = ticker.replace(".JK", "")
         
@@ -331,12 +362,19 @@ def show_chart(use_goapi):
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- PENGATURAN SIDEBAR ---
+# --- 12. PENGATURAN SIDEBAR & AKUN ---
 st.sidebar.header("⚙️ Pengaturan")
 mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Chart"])
 st.sidebar.divider()
 data_source = st.sidebar.radio("Sumber Data Bandar:", ["🌐 Yahoo Finance (Unlimited/Estimasi)", "🏦 GOAPI (Akurat/Limit Harian)"])
 use_goapi = "GOAPI" in data_source
+
+# Tambahkan opsi Logout di sidebar
+st.sidebar.divider()
+st.sidebar.markdown(f"👤 Login sebagai: **{st.session_state.get('username', '')}**")
+if st.sidebar.button("Keluar (Logout)"):
+    st.session_state["password_correct"] = False
+    st.rerun()
 
 if mode == "🔍 Super Screener": run_screener(use_goapi)
 else: show_chart(use_goapi) 
