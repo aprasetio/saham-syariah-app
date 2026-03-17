@@ -13,28 +13,22 @@ st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", pag
 
 # --- 2. SISTEM LOGIN AMAN (STREAMLIT SECRETS) ---
 def check_password():
-    """Mengembalikan True jika user sudah login, False jika belum."""
     def password_entered():
-        # Cek apakah username ada di brankas st.secrets["passwords"] dan passwordnya cocok
         if st.session_state["username"] in st.secrets["passwords"] and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Hapus password dari memori demi keamanan
+            del st.session_state["password"] 
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # Jika belum pernah coba login, tampilkan form
         st.markdown("<h1 style='text-align: center;'>🔒 Gerbang Keamanan</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center;'>Aplikasi ini hanya untuk kalangan terbatas.</p>", unsafe_allow_html=True)
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.text_input("Username", key="username")
             st.text_input("Password", type="password", key="password")
             st.button("Login", on_click=password_entered, use_container_width=True)
         return False
-    
     elif not st.session_state["password_correct"]:
-        # Jika salah password, tampilkan form lagi dengan pesan error
         st.markdown("<h1 style='text-align: center;'>🔒 Gerbang Keamanan</h1>", unsafe_allow_html=True)
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -44,27 +38,24 @@ def check_password():
             st.error("🚫 Username tidak dikenal atau Password salah!")
         return False
     else:
-        # Jika berhasil login, kembalikan True untuk melanjutkan aplikasi
         return True
 
-# HENTIKAN APLIKASI DI SINI JIKA BELUM LOGIN
 if not check_password():
     st.stop()
 
-# --- 3. AMBIL API KEY DARI BRANKAS (SANGAT AMAN) ---
 GOAPI_KEY = st.secrets["GOAPI_KEY"]
 
-# --- 4. CSS FIX ---
+# --- 3. CSS FIX ---
 st.markdown("""
 <style>
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
     [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; white-space: normal !important; }
-    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.3rem !important; white-space: normal !important; line-height: 1.2 !important; }
-    [data-testid="stMetricDelta"] div { font-size: 1rem !important; white-space: normal !important; }
+    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; white-space: normal !important; line-height: 1.2 !important; }
+    [data-testid="stMetricDelta"] div { font-size: 0.95rem !important; white-space: normal !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 5. DAFTAR SAHAM (JII 30) ---
+# --- 4. DAFTAR SAHAM (JII 30) ---
 SHARIA_STOCKS = [
     "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
     "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
@@ -72,7 +63,7 @@ SHARIA_STOCKS = [
     "AMRT", "ASII", "TPIA"
 ]
 
-# --- 6. HELPER FUNCTIONS ---
+# --- 5. HELPER FUNCTIONS ---
 def fix_dataframe(df):
     if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -91,28 +82,44 @@ def format_rupiah(angka):
     else: formatted = f"Rp {angka:,.0f}"
     return f"-{formatted}" if is_negative else formatted
 
-# --- 7. FUNGSI FETCH GOAPI (DIOPTIMALKAN & DIBERI CACHE) ---
+# --- 6. FUNGSI FETCH GOAPI (FOREIGN FLOW & HARGA MODAL ASING) ---
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
     headers = {
         'accept': 'application/json', 
         'X-API-KEY': GOAPI_KEY,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0'
     }
     net_foreign = 0
+    avg_buy_price = 0
+    
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
-        if res_broker.status_code != 200: return None 
+        if res_broker.status_code != 200: return None, 0
+        
         res_broker_json = res_broker.json()
+        total_buy_val = 0
+        total_buy_lot = 0
+        total_sell_val = 0
+        
         if res_broker_json.get('status') == 'success':
             for broker in res_broker_json['data']['results']:
-                if broker['side'] == 'BUY': net_foreign += broker['value']
-                elif broker['side'] == 'SELL': net_foreign -= broker['value']
-    except Exception as e: return None
-    return net_foreign
+                if broker['side'] == 'BUY':
+                    total_buy_val += broker['value']
+                    total_buy_lot += broker['lot']
+                elif broker['side'] == 'SELL':
+                    total_sell_val += broker['value']
+                    
+            net_foreign = total_buy_val - total_sell_val
+            # Hitung Harga Rata-rata Beli Asing (1 Lot = 100 lembar)
+            if total_buy_lot > 0:
+                avg_buy_price = total_buy_val / (total_buy_lot * 100)
+                
+    except Exception as e: return None, 0
+    return net_foreign, avg_buy_price
 
-# --- 8. FUNGSI FETCH FUNDAMENTAL (YAHOO) ---
+# --- 7. FUNGSI FETCH FUNDAMENTAL & PERTUMBUHAN LABA (YAHOO) ---
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
@@ -120,14 +127,14 @@ def get_fundamental_info(symbol):
         info = ticker.info
         return {
             "PBV": info.get('priceToBook', None),
-            "PER": info.get('trailingPE', None),
             "ROE": info.get('returnOnEquity', None), 
             "DER": info.get('debtToEquity', None),
-            "DivYield": info.get('dividendYield', None)
+            "DivYield": info.get('dividendYield', None),
+            "EPS_Growth": info.get('earningsQuarterlyGrowth', None) # Data Pertumbuhan Laba YoY
         }
     except: return None
 
-# --- 9. FUNGSI TEKNIKAL & WYCKOFF ---
+# --- 8. FUNGSI TEKNIKAL, WYCKOFF, ATR & EMA200 ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -156,6 +163,10 @@ def calculate_metrics(df):
         df['SMA20'] = df.ta.sma(length=20)
         df['SMA50'] = df.ta.sma(length=50)
         
+        # Tambahan Dewa: EMA 200 & ATR (Volatilitas)
+        df['EMA200'] = df.ta.ema(length=200)
+        df['ATR'] = df.ta.atr(length=14)
+        
         change = abs(df['Close'] - df['Close'].shift(14))
         volatility = abs(df['Close'] - df['Close'].shift(1)).rolling(window=14).sum()
         df['ER'] = change / volatility
@@ -167,7 +178,7 @@ def calculate_metrics(df):
     return df
 
 def advanced_analysis(df):
-    if len(df) < 15: return "N/A", "N/A", 0
+    if len(df) < 15: return "N/A", "-", 0
     curr = df.iloc[-1]
     er_val = curr.get('ER', 0)
     
@@ -194,9 +205,15 @@ def score_analysis(df, fund_data):
     score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0
     reasons = []
     
+    # Tren Mayor EMA 200
+    if not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
+        score_tech += 1
+        reasons.append("📈 Tren Mayor Naik (> EMA200)")
+        
+    # CMF Bandar Analysis
     cmf = curr.get('CMF', 0)
     if cmf > 0.1: score_bandar = 2; reasons.append("🐳 CMF: Akumulasi Besar")
-    elif cmf > 0.05: score_bandar = 1; reasons.append("💰 CMF: Akumulasi")
+    elif cmf > 0.05: score_bandar = 1
     elif cmf < -0.1: score_bandar = -2; reasons.append("🔻 CMF: Distribusi")
         
     if curr.get('MACD_12_26_9', 0) > curr.get('MACDs_12_26_9', 0): score_tech += 1
@@ -204,11 +221,15 @@ def score_analysis(df, fund_data):
     if rsi < 35: score_tech += 2; reasons.append("💎 RSI Oversold")
     elif rsi > 70: score_tech -= 1
     
+    # Fundamental & Laba
     if fund_data:
         pbv = fund_data.get('PBV')
-        roe = fund_data.get('ROE')
+        eps_g = fund_data.get('EPS_Growth')
         if pbv and pbv < 1.5: score_fund += 2
-        if roe and roe > 0.15: score_fund += 2
+        # Skor ekstra jika Laba tumbuh positif > 10%
+        if eps_g and eps_g > 0.10: 
+            score_fund += 2
+            reasons.append(f"🚀 Laba Tumbuh +{eps_g*100:.1f}%")
         
     s_candle, patterns = check_candlestick_patterns(curr, prev)
     score_candle += s_candle
@@ -216,13 +237,11 @@ def score_analysis(df, fund_data):
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
-# --- 10. FITUR SCREENER ---
+# --- 9. FITUR SCREENER ---
 def run_screener(use_goapi):
     st.header("🔍 Smart Money Screener (Optimized)")
-    if use_goapi:
-        st.success("🏦 Mode GOAPI VIP: Hemat Kuota! Hanya mengecek Foreign Flow untuk saham yang lolos uji teknikal.")
-    else:
-        st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Berdasarkan CMF Bandar).")
+    if use_goapi: st.success("🏦 Mode GOAPI VIP: Memfilter Foreign Flow & Harga Modal Bandar (Akurat & Hemat Kuota).")
+    else: st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Berdasarkan CMF Bandar).")
     
     if st.button("MULAI SCANNING"):
         progress = st.progress(0)
@@ -230,7 +249,8 @@ def run_screener(use_goapi):
         results = []
         tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
         
-        price_data = yf.download(tickers, period="6mo", group_by='ticker', auto_adjust=True, progress=False, threads=True)
+        # Tarik data 1 Tahun agar bisa menghitung EMA 200 dengan akurat
+        price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
         for i, t in enumerate(tickers):
             status.text(f"Analisa Lapis 1 (Yahoo): {t} ...")
@@ -239,7 +259,7 @@ def run_screener(use_goapi):
             try:
                 df = price_data[t].copy()
                 df = fix_dataframe(df)
-                if df.empty or len(df) < 20: continue
+                if df.empty or len(df) < 50: continue
                 if df['Volume'].iloc[-1] < 5000000: continue
                 
                 df = calculate_metrics(df)
@@ -247,6 +267,15 @@ def run_screener(use_goapi):
                 s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
                 wyckoff_phase, divergence, er_val = advanced_analysis(df)
                 total_score = s_tech + s_fund + s_bandar + s_candle
+                
+                # Kalkulasi ATR Stop Loss & Target Profit
+                atr = last.get('ATR', 0)
+                close = last['Close']
+                if atr > 0:
+                    stop_loss = close - (1.5 * atr) # Cut Loss ketat di 1.5 ATR
+                    target_profit = close + (3.0 * atr) # Reward 2x Lipat dari Risiko
+                else:
+                    stop_loss, target_profit = close * 0.9, close * 1.1
                 
                 rec = "WAIT"
                 if total_score >= 6 or "BULLISH DIV" in divergence: rec = "💎 STRONG BUY"
@@ -257,32 +286,28 @@ def run_screener(use_goapi):
                 
                 symbol_only = t.replace(".JK", "")
                 net_foreign = None
+                avg_buy_price = 0
                 
                 if use_goapi:
                     status.text(f"Analisa Lapis 2 (GOAPI - Cek Asing): {t} ...")
                     time.sleep(1) 
                     last_date = df.index[-1].strftime('%Y-%m-%d')
-                    net_foreign = fetch_goapi_foreign_flow(symbol_only, last_date)
+                    net_foreign, avg_buy_price = fetch_goapi_foreign_flow(symbol_only, last_date)
                     if net_foreign is not None and net_foreign <= 0: continue
                 
-                div_disp = "-"
-                if fund and fund.get('DivYield') is not None:
-                    div_disp = f"{fund.get('DivYield'):.2f}%" 
-                
                 if net_foreign is not None:
-                    reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}")
+                    modal_str = f" (Modal: Rp {int(avg_buy_price):,})" if avg_buy_price > 0 else ""
+                    reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}{modal_str}")
 
                 results.append({
                     "Kode": symbol_only,
-                    "Harga": int(last['Close']),
+                    "Harga": int(close),
+                    "Area TP / SL": f"Rp {int(target_profit):,} / Rp {int(stop_loss):,}",
                     "Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
                     "Net Foreign": format_rupiah(net_foreign) if net_foreign is not None else "N/A",
-                    "ER (Trend)": f"{er_val:.2f}",
+                    "Modal Asing": f"Rp {int(avg_buy_price):,}" if (use_goapi and avg_buy_price > 0) else "-",
                     "Rek": rec,
-                    "Skor Tech": s_tech + s_candle,
-                    "Skor Fund": s_fund,
-                    "Dividen": div_disp,
-                    "Alasan": " | ".join(reasons)
+                    "Alasan Utama": " | ".join(reasons)
                 })
             except: continue
             
@@ -290,15 +315,15 @@ def run_screener(use_goapi):
         status.empty()
         
         if results:
-            df_res = pd.DataFrame(results).sort_values(by=["Skor Tech", "Wyckoff"], ascending=[False, False])
-            st.success(f"Selesai! {len(results)} Saham Ditemukan.")
+            df_res = pd.DataFrame(results)
+            st.success(f"Selesai! {len(results)} Saham Terbaik Ditemukan.")
             st.dataframe(df_res, use_container_width=True)
         else:
             st.warning("Data kosong / Tidak ada saham yang masuk kriteria.")
 
-# --- 11. FITUR CHART DETAIL ---
+# --- 10. FITUR CHART DETAIL ---
 def show_chart(use_goapi):
-    st.header("📊 Deep Analysis & Tracker")
+    st.header("📊 Deep Analysis & Target Tracker")
     
     with st.form(key='chart_search_form'):
         c_input, c_btn = st.columns([4, 1])
@@ -318,36 +343,58 @@ def show_chart(use_goapi):
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
         wyckoff_phase, divergence, er_val = advanced_analysis(df)
         
-        net_foreign = None
+        net_foreign, avg_buy_price = None, 0
         if use_goapi:
             last_date = df.index[-1].strftime('%Y-%m-%d')
-            net_foreign = fetch_goapi_foreign_flow(ticker_only, last_date)
+            net_foreign, avg_buy_price = fetch_goapi_foreign_flow(ticker_only, last_date)
             
         st.divider()
         
+        # Kalkulasi ATR Stop Loss & Target Profit
+        atr = last.get('ATR', 0)
+        close = last['Close']
+        if atr > 0:
+            stop_loss = close - (1.5 * atr)
+            target_profit = close + (3.0 * atr)
+            tp_pct = ((target_profit - close) / close) * 100
+        else:
+            stop_loss, target_profit, tp_pct = close, close, 0
+            
+        # TAMPILAN METRIK (4 KOLOM)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Harga Terakhir", f"Rp {int(last['Close']):,}")
-        c2.metric("Fase Wyckoff", wyckoff_phase)
+        c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", wyckoff_phase)
+        c2.metric("Target (TP) & Stop Loss", f"Rp {int(target_profit):,}", f"Cut Loss: Rp {int(stop_loss):,} (+{tp_pct:.1f}% TP)", delta_color="normal")
         
         if net_foreign is not None:
             foreign_label = "🟢 AKUMULASI" if net_foreign > 0 else ("🔴 DISTRIBUSI" if net_foreign < 0 else "⚪ NETRAL")
-            c3.metric("Foreign Flow (Asing)", foreign_label, format_rupiah(net_foreign), delta_color="normal" if net_foreign > 0 else "inverse")
+            modal_str = f"Modal Bandar: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else "Modal: -"
+            c3.metric(f"Asing ({foreign_label})", format_rupiah(net_foreign), modal_str, delta_color="normal" if net_foreign > 0 else "inverse")
         else:
-            c3.metric("Foreign Flow (Asing)", "N/A", "Gunakan Mode GOAPI atau Limit Habis", delta_color="off")
+            c3.metric("Foreign Flow (Asing)", "N/A", "Gunakan Mode GOAPI / Limit Habis", delta_color="off")
         
-        er_status = "Trending 🚀" if er_val > 0.3 else ("Choppy/Sideways 💤" if er_val < 0.2 else "Netral")
-        c4.metric("Trend Quality (ER)", f"{er_val:.2f}", delta=er_status, delta_color="normal" if er_val > 0.3 else "off")
+        # Ekstrak Laba YoY
+        eps_g = fund.get('EPS_Growth') if fund else None
+        laba_str = f"Laba (YoY): +{eps_g*100:.1f}% 🚀" if eps_g and eps_g > 0 else (f"Laba: {eps_g*100:.1f}% 🔻" if eps_g else "Laba: N/A")
+        c4.metric("Trend Mayor (>EMA200)", "✅ BULLISH" if not pd.isna(last.get('EMA200')) and close > last['EMA200'] else "❌ BEARISH", laba_str, delta_color="normal" if (eps_g and eps_g > 0) else "off")
         
         if "BULLISH DIV" in divergence:
             st.success(f"🚨 **DIVERGENCE ALERT:** {divergence} - Peluang besar harga akan segera rebound!")
         elif "BEARISH DIV" in divergence:
-            st.error(f"🚨 **DIVERGENCE ALERT:** {divergence} - Hati-hati, bandar jualan di pucuk!")
+            st.error(f"🚨 **DIVERGENCE ALERT:** {divergence} - Hati-hati, indikator distribusi di pucuk!")
         
-        st.subheader(f"Visualisasi Grafik {ticker_only}")
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05, subplot_titles=("Harga & Pola", "Volume", "Bandar Flow (CMF)"))
+        st.subheader(f"Visualisasi Grafik {ticker_only} & Titik Krusial")
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05, subplot_titles=("Harga, Target, & Trend Mayor", "Volume", "Bandar Flow (CMF)"))
+        
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.5), name='MA20'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue', width=1.5), name='MA50'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA200'], line=dict(color='purple', width=2.5), name='EMA200 (Mayor)'), row=1, col=1)
+        
+        # Gambar Garis Target Profit (Hijau), Stop Loss (Merah), dan Modal Asing (Biru)
+        if atr > 0:
+            fig.add_hline(y=target_profit, line_dash="dash", line_color="green", annotation_text="Target Profit", row=1, col=1)
+            fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", annotation_text="Stop Loss", row=1, col=1)
+        if use_goapi and avg_buy_price > 0:
+            fig.add_hline(y=avg_buy_price, line_dash="dot", line_color="blue", annotation_text="Modal Asing", row=1, col=1)
         
         _, patterns = check_candlestick_patterns(df.iloc[-1], df.iloc[-2])
         if patterns: fig.add_annotation(x=df.index[-1], y=df['High'].iloc[-1], text=patterns[0], showarrow=True, arrowhead=1, row=1, col=1)
@@ -362,14 +409,13 @@ def show_chart(use_goapi):
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 12. PENGATURAN SIDEBAR & AKUN ---
+# --- 11. PENGATURAN SIDEBAR & AKUN ---
 st.sidebar.header("⚙️ Pengaturan")
 mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Chart"])
 st.sidebar.divider()
 data_source = st.sidebar.radio("Sumber Data Bandar:", ["🌐 Yahoo Finance (Unlimited/Estimasi)", "🏦 GOAPI (Akurat/Limit Harian)"])
 use_goapi = "GOAPI" in data_source
 
-# Tambahkan opsi Logout di sidebar
 st.sidebar.divider()
 st.sidebar.markdown(f"👤 Login sebagai: **{st.session_state.get('username', '')}**")
 if st.sidebar.button("Keluar (Logout)"):
