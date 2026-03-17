@@ -44,9 +44,11 @@ def check_password():
 if not check_password():
     st.stop()
 
+# --- 3. AMBIL DATA RAHASIA DARI STREAMLIT SECRETS ---
 GOAPI_KEY = st.secrets["GOAPI_KEY"]
+ADMIN_USERS = st.secrets.get("ADMIN_USERS", []) # Mengambil list admin dengan aman
 
-# --- 3. CSS FIX ---
+# --- 4. CSS FIX ---
 st.markdown("""
 <style>
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
@@ -56,7 +58,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. DAFTAR SAHAM (JII 30) ---
+# --- 5. DAFTAR SAHAM (JII 30) ---
 SHARIA_STOCKS = [
     "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
     "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
@@ -64,7 +66,7 @@ SHARIA_STOCKS = [
     "AMRT", "ASII", "TPIA"
 ]
 
-# --- 5. HELPER FUNCTIONS ---
+# --- 6. HELPER FUNCTIONS ---
 def fix_dataframe(df):
     if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -88,15 +90,12 @@ def get_goapi_target_date(df):
     wib_time = datetime.utcnow() + timedelta(hours=7)
     latest_yf_date = df.index[-1].date()
     
-    # Jika hari ini bursa buka, kita tunggu sampai jam 18:00 WIB agar data GOAPI benar-benar siap
     if latest_yf_date == wib_time.date() and wib_time.hour < 18:
-        # Paksa pakai data kemarin agar aman dan pakai Cache
         return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
     else:
-        # Jika sudah lewat jam 18:00 WIB, aman pakai data hari ini
         return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 6. FUNGSI FETCH GOAPI ---
+# --- 7. FUNGSI FETCH GOAPI ---
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
     headers = {
@@ -132,7 +131,7 @@ def fetch_goapi_foreign_flow(symbol, target_date):
     except: return None, 0, None
     return net_foreign, avg_buy_price, fetch_time
 
-# --- 7. FUNGSI FETCH FUNDAMENTAL ---
+# --- 8. FUNGSI FETCH FUNDAMENTAL ---
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
@@ -147,7 +146,7 @@ def get_fundamental_info(symbol):
         }
     except: return None
 
-# --- 8. FUNGSI TEKNIKAL ---
+# --- 9. FUNGSI TEKNIKAL ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -257,7 +256,7 @@ def score_analysis(df, fund_data):
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
-# --- 9. FITUR SCREENER ---
+# --- 10. FITUR SCREENER ---
 def run_screener(use_goapi):
     st.header("🔍 Smart Money Screener (Optimized)")
     if use_goapi: st.success("🏦 Mode GOAPI VIP: Memfilter Foreign Flow & Harga Modal Bandar (Akurat & Hemat Kuota).")
@@ -355,7 +354,7 @@ def run_screener(use_goapi):
         else:
             st.warning("Data kosong / Tidak ada saham yang masuk kriteria.")
 
-# --- 10. FITUR CHART DETAIL ---
+# --- 11. FITUR CHART DETAIL ---
 def show_chart(use_goapi):
     st.header("📊 Deep Analysis & Target Tracker")
     
@@ -453,7 +452,7 @@ def show_chart(use_goapi):
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 11. PENGATURAN SIDEBAR & AKUN ---
+# --- 12. PENGATURAN SIDEBAR & AKUN ---
 st.sidebar.header("⚙️ Pengaturan")
 mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Chart"])
 st.sidebar.divider()
@@ -461,7 +460,17 @@ data_source = st.sidebar.radio("Sumber Data Bandar:", ["🌐 Yahoo Finance (Unli
 use_goapi = "GOAPI" in data_source
 
 st.sidebar.divider()
-st.sidebar.markdown(f"👤 Login sebagai: **{st.session_state.get('username', '')}**")
+
+# --- FITUR ADMIN: HANYA MUNCUL JIKA USERNAME ADA DI LIST ADMIN_USERS ---
+current_user = st.session_state.get('username', '')
+if current_user in ADMIN_USERS:
+    st.sidebar.markdown("👑 **Admin Panel**")
+    if st.sidebar.button("🧹 Bersihkan Memori (Refresh Data)"):
+        st.cache_data.clear()
+        st.sidebar.success("✅ Memori berhasil dihapus! Silakan klik Mulai Scanning lagi untuk menarik data terbaru.")
+    st.sidebar.divider()
+
+st.sidebar.markdown(f"👤 Login sebagai: **{current_user}**")
 if st.sidebar.button("Keluar (Logout)"):
     st.session_state["password_correct"] = False
     st.rerun()
