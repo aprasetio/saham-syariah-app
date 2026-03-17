@@ -7,11 +7,12 @@ from plotly.subplots import make_subplots
 import requests
 import numpy as np
 import time
+from datetime import datetime, timedelta
 
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", page_icon="🏦")
 
-# --- 2. SISTEM LOGIN AMAN (STREAMLIT SECRETS) ---
+# --- 2. SISTEM LOGIN AMAN ---
 def check_password():
     def password_entered():
         if st.session_state["username"] in st.secrets["passwords"] and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
@@ -82,6 +83,19 @@ def format_rupiah(angka):
     else: formatted = f"Rp {angka:,.0f}"
     return f"-{formatted}" if is_negative else formatted
 
+def get_goapi_target_date(df):
+    """Menentukan tanggal yang tepat untuk nembak GOAPI (Mencegah Error Siang Hari)"""
+    wib_time = datetime.utcnow() + timedelta(hours=7)
+    latest_yf_date = df.index[-1].date()
+    
+    # Jika candle terakhir adalah hari ini, tapi jam masih di bawah 16:30 WIB
+    if latest_yf_date == wib_time.date() and (wib_time.hour < 16 or (wib_time.hour == 16 and wib_time.minute < 30)):
+        # Bursa belum rilis data bandar, paksa pakai tanggal kemarin agar bisa pakai Cache!
+        return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
+    else:
+        # Jika sudah sore/malam, aman pakai data hari ini
+        return df.index[-1].strftime('%Y-%m-%d')
+
 # --- 6. FUNGSI FETCH GOAPI ---
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
@@ -92,10 +106,13 @@ def fetch_goapi_foreign_flow(symbol, target_date):
     }
     net_foreign = 0
     avg_buy_price = 0
+    wib_time = datetime.utcnow() + timedelta(hours=7)
+    fetch_time = wib_time.strftime("%d %b %Y, %H:%M WIB")
+    
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
-        if res_broker.status_code != 200: return None, 0
+        if res_broker.status_code != 200: return None, 0, None
         
         res_broker_json = res_broker.json()
         total_buy_val, total_buy_lot, total_sell_val = 0, 0, 0
@@ -112,8 +129,8 @@ def fetch_goapi_foreign_flow(symbol, target_date):
             if total_buy_lot > 0:
                 avg_buy_price = total_buy_val / (total_buy_lot * 100)
                 
-    except: return None, 0
-    return net_foreign, avg_buy_price
+    except: return None, 0, None
+    return net_foreign, avg_buy_price, fetch_time
 
 # --- 7. FUNGSI FETCH FUNDAMENTAL ---
 @st.cache_data(ttl=3600) 
@@ -130,7 +147,7 @@ def get_fundamental_info(symbol):
         }
     except: return None
 
-# --- 8. FUNGSI TEKNIKAL, WYCKOFF, ATR & PERFECT UPTREND ---
+# --- 8. FUNGSI TEKNIKAL ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -157,7 +174,6 @@ def calculate_metrics(df):
         macd = df.ta.macd(fast=12, slow=26, signal=9)
         bbands = df.ta.bbands(length=20, std=2)
         
-        # --- MOVING AVERAGES LENGKAP UNTUK "ALL ABOVE MA" ---
         df['SMA20'] = df.ta.sma(length=20)
         df['SMA50'] = df.ta.sma(length=50)
         df['SMA100'] = df.ta.sma(length=100)
@@ -203,7 +219,6 @@ def score_analysis(df, fund_data):
     score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0
     reasons = []
     
-    # --- LOGIKA "ALL ABOVE MA" (PERFECT UPTREND) ---
     is_all_above_ma = False
     if not pd.isna(curr.get('SMA100')) and not pd.isna(curr.get('EMA200')):
         if (curr['Close'] > curr['SMA20'] and 
@@ -211,10 +226,9 @@ def score_analysis(df, fund_data):
             curr['Close'] > curr['SMA100'] and 
             curr['Close'] > curr['EMA200']):
             is_all_above_ma = True
-            score_tech += 2  # Bonus Skor karena tren sangat kuat
+            score_tech += 2  
             reasons.append("🔥 ALL ABOVE MA (Super Uptrend)")
     
-    # Tren Mayor EMA 200 Saja (Jika tidak all above MA)
     if not is_all_above_ma and not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
         score_tech += 1
         reasons.append("📈 Tren Mayor Naik (> EMA200)")
@@ -257,6 +271,9 @@ def run_screener(use_goapi):
         
         price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
+        last_sync_time = None 
+        last_bursa_date = None
+        
         for i, t in enumerate(tickers):
             status.text(f"Analisa Lapis 1 (Yahoo): {t} ...")
             progress.progress((i+1)/len(tickers))
@@ -294,11 +311,17 @@ def run_screener(use_goapi):
                 net_foreign = None
                 avg_buy_price = 0
                 
+                # --- PERBAIKAN: SMART TIME-SYNC ---
+                goapi_date = get_goapi_target_date(df)
+                last_bursa_date = df.index[-1].strftime('%d %b %Y') # Tetap tunjukkan candle terakhir untuk layar
+                
                 if use_goapi:
                     status.text(f"Analisa Lapis 2 (GOAPI - Cek Asing): {t} ...")
                     time.sleep(1) 
-                    last_date = df.index[-1].strftime('%Y-%m-%d')
-                    net_foreign, avg_buy_price = fetch_goapi_foreign_flow(symbol_only, last_date)
+                    
+                    net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(symbol_only, goapi_date)
+                    if fetch_time: last_sync_time = fetch_time 
+                    
                     if net_foreign is not None and net_foreign <= 0: continue
                 
                 if net_foreign is not None:
@@ -323,6 +346,10 @@ def run_screener(use_goapi):
         if results:
             df_res = pd.DataFrame(results)
             st.success(f"Selesai! {len(results)} Saham Terbaik Ditemukan.")
+            if use_goapi and last_sync_time:
+                st.caption(f"📅 **Data Harga Per:** {last_bursa_date} | 🔄 **Data Asing Diambil Tgl:** {goapi_date} (Sync: {last_sync_time})")
+            elif last_bursa_date:
+                st.caption(f"📅 **Data Bursa Per:** {last_bursa_date} | 🌐 **Sumber Bandar:** Yahoo Finance")
             st.dataframe(df_res, use_container_width=True)
         else:
             st.warning("Data kosong / Tidak ada saham yang masuk kriteria.")
@@ -349,12 +376,21 @@ def show_chart(use_goapi):
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
         wyckoff_phase, divergence, er_val = advanced_analysis(df)
         
-        net_foreign, avg_buy_price = None, 0
+        net_foreign, avg_buy_price, fetch_time = None, 0, None
+        
+        # --- PERBAIKAN: SMART TIME-SYNC ---
+        goapi_date = get_goapi_target_date(df)
+        last_date_disp = df.index[-1].strftime('%d %b %Y')
+        
         if use_goapi:
-            last_date = df.index[-1].strftime('%Y-%m-%d')
-            net_foreign, avg_buy_price = fetch_goapi_foreign_flow(ticker_only, last_date)
+            net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(ticker_only, goapi_date)
             
         st.divider()
+        
+        if use_goapi and fetch_time:
+            st.caption(f"📅 **Harga Per:** {last_date_disp} | 🔄 **Asing Diambil Tgl:** {goapi_date} (Sync: {fetch_time})")
+        else:
+            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Estimasi / Mode Gratis)")
         
         atr = last.get('ATR', 0)
         close = last['Close']
@@ -376,7 +412,6 @@ def show_chart(use_goapi):
         else:
             c3.metric("Foreign Flow (Asing)", "N/A", "Gunakan Mode GOAPI / Limit Habis", delta_color="off")
         
-        # Penanda ALL ABOVE MA
         is_all_ma = "ALL ABOVE MA" in " ".join(reasons)
         ma_status = "🔥 PERFECT UPTREND (All MA)" if is_all_ma else ("✅ BULLISH (>EMA200)" if not pd.isna(last.get('EMA200')) and close > last['EMA200'] else "❌ BEARISH")
         eps_g = fund.get('EPS_Growth') if fund else None
@@ -394,7 +429,6 @@ def show_chart(use_goapi):
         
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
         
-        # --- MENAMPILKAN SEMUA GARIS MA (PELANGI) ---
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.5), name='MA20'), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue', width=1.5), name='MA50'), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA100'], line=dict(color='green', width=2), name='MA100'), row=1, col=1)
