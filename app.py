@@ -84,16 +84,16 @@ def format_rupiah(angka):
     return f"-{formatted}" if is_negative else formatted
 
 def get_goapi_target_date(df):
-    """Menentukan tanggal yang tepat untuk nembak GOAPI (Mencegah Error Siang Hari)"""
+    """Menentukan tanggal yang tepat untuk nembak GOAPI (Batas Aman Jam 18:00 WIB)"""
     wib_time = datetime.utcnow() + timedelta(hours=7)
     latest_yf_date = df.index[-1].date()
     
-    # Jika candle terakhir adalah hari ini, tapi jam masih di bawah 16:30 WIB
-    if latest_yf_date == wib_time.date() and (wib_time.hour < 16 or (wib_time.hour == 16 and wib_time.minute < 30)):
-        # Bursa belum rilis data bandar, paksa pakai tanggal kemarin agar bisa pakai Cache!
+    # Jika hari ini bursa buka, kita tunggu sampai jam 18:00 WIB agar data GOAPI benar-benar siap
+    if latest_yf_date == wib_time.date() and wib_time.hour < 18:
+        # Paksa pakai data kemarin agar aman dan pakai Cache
         return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
     else:
-        # Jika sudah sore/malam, aman pakai data hari ini
+        # Jika sudah lewat jam 18:00 WIB, aman pakai data hari ini
         return df.index[-1].strftime('%Y-%m-%d')
 
 # --- 6. FUNGSI FETCH GOAPI ---
@@ -273,6 +273,7 @@ def run_screener(use_goapi):
         
         last_sync_time = None 
         last_bursa_date = None
+        goapi_date_used = None
         
         for i, t in enumerate(tickers):
             status.text(f"Analisa Lapis 1 (Yahoo): {t} ...")
@@ -311,9 +312,9 @@ def run_screener(use_goapi):
                 net_foreign = None
                 avg_buy_price = 0
                 
-                # --- PERBAIKAN: SMART TIME-SYNC ---
                 goapi_date = get_goapi_target_date(df)
-                last_bursa_date = df.index[-1].strftime('%d %b %Y') # Tetap tunjukkan candle terakhir untuk layar
+                goapi_date_used = goapi_date
+                last_bursa_date = df.index[-1].strftime('%d %b %Y') 
                 
                 if use_goapi:
                     status.text(f"Analisa Lapis 2 (GOAPI - Cek Asing): {t} ...")
@@ -347,7 +348,7 @@ def run_screener(use_goapi):
             df_res = pd.DataFrame(results)
             st.success(f"Selesai! {len(results)} Saham Terbaik Ditemukan.")
             if use_goapi and last_sync_time:
-                st.caption(f"📅 **Data Harga Per:** {last_bursa_date} | 🔄 **Data Asing Diambil Tgl:** {goapi_date} (Sync: {last_sync_time})")
+                st.caption(f"📅 **Data Harga Per:** {last_bursa_date} | 🔄 **Data Asing Diambil Tgl:** {goapi_date_used} (Sync: {last_sync_time})")
             elif last_bursa_date:
                 st.caption(f"📅 **Data Bursa Per:** {last_bursa_date} | 🌐 **Sumber Bandar:** Yahoo Finance")
             st.dataframe(df_res, use_container_width=True)
@@ -378,7 +379,6 @@ def show_chart(use_goapi):
         
         net_foreign, avg_buy_price, fetch_time = None, 0, None
         
-        # --- PERBAIKAN: SMART TIME-SYNC ---
         goapi_date = get_goapi_target_date(df)
         last_date_disp = df.index[-1].strftime('%d %b %Y')
         
@@ -467,4 +467,4 @@ if st.sidebar.button("Keluar (Logout)"):
     st.rerun()
 
 if mode == "🔍 Super Screener": run_screener(use_goapi)
-else: show_chart(use_goapi) 
+else: show_chart(use_goapi)
