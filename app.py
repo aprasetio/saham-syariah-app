@@ -89,19 +89,16 @@ def format_rupiah(angka):
     return f"-{formatted}" if is_negative else formatted
 
 def get_goapi_target_date(df):
-    """Menentukan tanggal yang tepat untuk nembak GOAPI (Batas Aman Jam 18:00 WIB)"""
     wib_time = datetime.utcnow() + timedelta(hours=7)
     latest_yf_date = df.index[-1].date()
-    
     if latest_yf_date == wib_time.date() and wib_time.hour < 18:
         return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
     else:
         return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 7. FUNGSI FETCH GOAPI (ANTI-BLOKIR DENGAN ERROR LOGGER) ---
+# --- 7. FUNGSI FETCH GOAPI ---
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
-    # KEMBALI MENGGUNAKAN TOPENG LENGKAP AGAR TIDAK DITOLAK CLOUDFLARE
     headers = {
         'accept': 'application/json', 
         'X-API-KEY': GOAPI_KEY,
@@ -115,10 +112,8 @@ def fetch_goapi_foreign_flow(symbol, target_date):
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
-        
-        # MUNCULKAN ERROR JIKA DIBLOKIR ATAU KENA LIMIT!
         if res_broker.status_code != 200:
-            st.sidebar.error(f"🚨 GOAPI Error pada {symbol}: {res_broker.status_code} - {res_broker.text[:60]}")
+            st.sidebar.error(f"🚨 GOAPI Error {symbol}: {res_broker.status_code}")
             return None, 0, None
         
         res_broker_json = res_broker.json()
@@ -135,12 +130,9 @@ def fetch_goapi_foreign_flow(symbol, target_date):
             net_foreign = total_buy_val - total_sell_val
             if total_buy_lot > 0:
                 avg_buy_price = total_buy_val / (total_buy_lot * 100)
-        else:
-            # Jika JSON membalas sukses tapi datanya kosong/error
-            st.sidebar.warning(f"⚠️ Data GOAPI untuk {symbol} kosong/tidak ditemukan.")
                 
     except Exception as e: 
-        st.sidebar.error(f"🔌 Koneksi ke GOAPI Terputus: {e}")
+        st.sidebar.error(f"🔌 Koneksi GOAPI Terputus: {e}")
         return None, 0, None
         
     return net_foreign, avg_buy_price, fetch_time
@@ -191,7 +183,6 @@ def calculate_metrics(df):
         df['SMA50'] = df.ta.sma(length=50)
         df['SMA100'] = df.ta.sma(length=100)
         df['EMA200'] = df.ta.ema(length=200)
-        
         df['ATR'] = df.ta.atr(length=14)
         
         change = abs(df['Close'] - df['Close'].shift(14))
@@ -306,6 +297,9 @@ def run_screener(use_goapi):
                 
                 atr = last.get('ATR', 0)
                 close = last['Close']
+                volume = last['Volume']
+                daily_turnover = close * volume  # TOTAL TRANSAKSI HARIAN (RUPIAH)
+                
                 if atr > 0:
                     stop_loss = close - (1.5 * atr) 
                     target_profit = close + (3.0 * atr) 
@@ -324,6 +318,7 @@ def run_screener(use_goapi):
                 symbol_only = t.replace(".JK", "")
                 net_foreign = None
                 avg_buy_price = 0
+                power_pct = 0
                 
                 goapi_date = get_goapi_target_date(df)
                 goapi_date_used = goapi_date
@@ -339,8 +334,13 @@ def run_screener(use_goapi):
                     if net_foreign is not None and net_foreign <= 0: continue
                 
                 if net_foreign is not None:
-                    modal_str = f" (Modal: Rp {int(avg_buy_price):,})" if avg_buy_price > 0 else ""
-                    reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}{modal_str}")
+                    # MENGHITUNG PERSENTASE DOMINASI ASING
+                    if daily_turnover > 0:
+                        power_pct = (abs(net_foreign) / daily_turnover) * 100
+                        
+                    power_str = f" 🔥 (Power: {power_pct:.1f}%)" if power_pct >= 10 else f" (Power: {power_pct:.1f}%)"
+                    modal_str = f" Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else ""
+                    reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}{power_str} |{modal_str}")
 
                 results.append({
                     "Kode": symbol_only,
@@ -348,7 +348,7 @@ def run_screener(use_goapi):
                     "Area TP / SL": f"Rp {int(target_profit):,} / Rp {int(stop_loss):,}",
                     "Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
                     "Net Foreign": format_rupiah(net_foreign) if net_foreign is not None else "N/A",
-                    "Modal Asing": f"Rp {int(avg_buy_price):,}" if (use_goapi and avg_buy_price > 0) else "-",
+                    "Dominasi Asing": f"{power_pct:.1f}%" if use_goapi and net_foreign is not None else "-",
                     "Rek": rec,
                     "Alasan Utama": " | ".join(reasons)
                 })
@@ -408,10 +408,13 @@ def show_chart(use_goapi):
         if use_goapi and fetch_time:
             st.caption(f"📅 **Harga Per:** {last_date_disp} | 🔄 **Asing Diambil Tgl:** {goapi_date} (Sync: {fetch_time})")
         else:
-            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Atau Koneksi GOAPI Terputus)")
+            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Estimasi / Mode Gratis)")
         
         atr = last.get('ATR', 0)
         close = last['Close']
+        volume = last['Volume']
+        daily_turnover = close * volume
+        
         if atr > 0:
             stop_loss = close - (1.5 * atr)
             target_profit = close + (3.0 * atr)
@@ -424,9 +427,14 @@ def show_chart(use_goapi):
         c2.metric("Target (TP) & Stop Loss", f"Rp {int(target_profit):,}", f"Cut Loss: Rp {int(stop_loss):,} (+{tp_pct:.1f}% TP)", delta_color="normal")
         
         if net_foreign is not None:
+            power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
             foreign_label = "🟢 AKUMULASI" if net_foreign > 0 else ("🔴 DISTRIBUSI" if net_foreign < 0 else "⚪ NETRAL")
-            modal_str = f"Modal Bandar: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else "Modal: -"
-            c3.metric(f"Asing ({foreign_label})", format_rupiah(net_foreign), modal_str, delta_color="normal" if net_foreign > 0 else "inverse")
+            power_info = f"Dominasi Asing: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else f"Dominasi Asing: {power_pct:.1f}%"
+            
+            # Jika dominasi sangat besar (>10%), beri highlight!
+            if power_pct >= 10: power_info = "🔥 " + power_info
+            
+            c3.metric(f"Asing ({foreign_label})", format_rupiah(net_foreign), power_info, delta_color="normal" if net_foreign > 0 else "inverse")
         else:
             c3.metric("Foreign Flow (Asing)", "N/A", "Terjadi Error/Limit pada Koneksi GOAPI", delta_color="off")
         
