@@ -82,7 +82,7 @@ def format_rupiah(angka):
     else: formatted = f"Rp {angka:,.0f}"
     return f"-{formatted}" if is_negative else formatted
 
-# --- 6. FUNGSI FETCH GOAPI (FOREIGN FLOW & HARGA MODAL ASING) ---
+# --- 6. FUNGSI FETCH GOAPI ---
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
     headers = {
@@ -92,16 +92,13 @@ def fetch_goapi_foreign_flow(symbol, target_date):
     }
     net_foreign = 0
     avg_buy_price = 0
-    
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
         if res_broker.status_code != 200: return None, 0
         
         res_broker_json = res_broker.json()
-        total_buy_val = 0
-        total_buy_lot = 0
-        total_sell_val = 0
+        total_buy_val, total_buy_lot, total_sell_val = 0, 0, 0
         
         if res_broker_json.get('status') == 'success':
             for broker in res_broker_json['data']['results']:
@@ -112,14 +109,13 @@ def fetch_goapi_foreign_flow(symbol, target_date):
                     total_sell_val += broker['value']
                     
             net_foreign = total_buy_val - total_sell_val
-            # Hitung Harga Rata-rata Beli Asing (1 Lot = 100 lembar)
             if total_buy_lot > 0:
                 avg_buy_price = total_buy_val / (total_buy_lot * 100)
                 
-    except Exception as e: return None, 0
+    except: return None, 0
     return net_foreign, avg_buy_price
 
-# --- 7. FUNGSI FETCH FUNDAMENTAL & PERTUMBUHAN LABA (YAHOO) ---
+# --- 7. FUNGSI FETCH FUNDAMENTAL ---
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
@@ -130,11 +126,11 @@ def get_fundamental_info(symbol):
             "ROE": info.get('returnOnEquity', None), 
             "DER": info.get('debtToEquity', None),
             "DivYield": info.get('dividendYield', None),
-            "EPS_Growth": info.get('earningsQuarterlyGrowth', None) # Data Pertumbuhan Laba YoY
+            "EPS_Growth": info.get('earningsQuarterlyGrowth', None)
         }
     except: return None
 
-# --- 8. FUNGSI TEKNIKAL, WYCKOFF, ATR & EMA200 ---
+# --- 8. FUNGSI TEKNIKAL, WYCKOFF, ATR & PERFECT UPTREND ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -160,11 +156,13 @@ def calculate_metrics(df):
         df['Rsi'] = df.ta.rsi(length=14)
         macd = df.ta.macd(fast=12, slow=26, signal=9)
         bbands = df.ta.bbands(length=20, std=2)
+        
+        # --- MOVING AVERAGES LENGKAP UNTUK "ALL ABOVE MA" ---
         df['SMA20'] = df.ta.sma(length=20)
         df['SMA50'] = df.ta.sma(length=50)
-        
-        # Tambahan Dewa: EMA 200 & ATR (Volatilitas)
+        df['SMA100'] = df.ta.sma(length=100)
         df['EMA200'] = df.ta.ema(length=200)
+        
         df['ATR'] = df.ta.atr(length=14)
         
         change = abs(df['Close'] - df['Close'].shift(14))
@@ -205,12 +203,22 @@ def score_analysis(df, fund_data):
     score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0
     reasons = []
     
-    # Tren Mayor EMA 200
-    if not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
+    # --- LOGIKA "ALL ABOVE MA" (PERFECT UPTREND) ---
+    is_all_above_ma = False
+    if not pd.isna(curr.get('SMA100')) and not pd.isna(curr.get('EMA200')):
+        if (curr['Close'] > curr['SMA20'] and 
+            curr['Close'] > curr['SMA50'] and 
+            curr['Close'] > curr['SMA100'] and 
+            curr['Close'] > curr['EMA200']):
+            is_all_above_ma = True
+            score_tech += 2  # Bonus Skor karena tren sangat kuat
+            reasons.append("🔥 ALL ABOVE MA (Super Uptrend)")
+    
+    # Tren Mayor EMA 200 Saja (Jika tidak all above MA)
+    if not is_all_above_ma and not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
         score_tech += 1
         reasons.append("📈 Tren Mayor Naik (> EMA200)")
         
-    # CMF Bandar Analysis
     cmf = curr.get('CMF', 0)
     if cmf > 0.1: score_bandar = 2; reasons.append("🐳 CMF: Akumulasi Besar")
     elif cmf > 0.05: score_bandar = 1
@@ -221,12 +229,10 @@ def score_analysis(df, fund_data):
     if rsi < 35: score_tech += 2; reasons.append("💎 RSI Oversold")
     elif rsi > 70: score_tech -= 1
     
-    # Fundamental & Laba
     if fund_data:
         pbv = fund_data.get('PBV')
         eps_g = fund_data.get('EPS_Growth')
         if pbv and pbv < 1.5: score_fund += 2
-        # Skor ekstra jika Laba tumbuh positif > 10%
         if eps_g and eps_g > 0.10: 
             score_fund += 2
             reasons.append(f"🚀 Laba Tumbuh +{eps_g*100:.1f}%")
@@ -249,7 +255,6 @@ def run_screener(use_goapi):
         results = []
         tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
         
-        # Tarik data 1 Tahun agar bisa menghitung EMA 200 dengan akurat
         price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
         for i, t in enumerate(tickers):
@@ -268,20 +273,21 @@ def run_screener(use_goapi):
                 wyckoff_phase, divergence, er_val = advanced_analysis(df)
                 total_score = s_tech + s_fund + s_bandar + s_candle
                 
-                # Kalkulasi ATR Stop Loss & Target Profit
                 atr = last.get('ATR', 0)
                 close = last['Close']
                 if atr > 0:
-                    stop_loss = close - (1.5 * atr) # Cut Loss ketat di 1.5 ATR
-                    target_profit = close + (3.0 * atr) # Reward 2x Lipat dari Risiko
+                    stop_loss = close - (1.5 * atr) 
+                    target_profit = close + (3.0 * atr) 
                 else:
                     stop_loss, target_profit = close * 0.9, close * 1.1
                 
                 rec = "WAIT"
-                if total_score >= 6 or "BULLISH DIV" in divergence: rec = "💎 STRONG BUY"
-                elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
+                if total_score >= 6 or "BULLISH DIV" in divergence or "ALL ABOVE MA" in " ".join(reasons): 
+                    rec = "💎 STRONG BUY"
+                elif total_score >= 4 or "Accumulation" in wyckoff_phase: 
+                    rec = "✅ BUY"
                 
-                if total_score < 3 and "BULLISH DIV" not in divergence and "Accumulation" not in wyckoff_phase:
+                if total_score < 3 and "BULLISH DIV" not in divergence and "Accumulation" not in wyckoff_phase and "ALL ABOVE MA" not in " ".join(reasons):
                     continue
                 
                 symbol_only = t.replace(".JK", "")
@@ -350,7 +356,6 @@ def show_chart(use_goapi):
             
         st.divider()
         
-        # Kalkulasi ATR Stop Loss & Target Profit
         atr = last.get('ATR', 0)
         close = last['Close']
         if atr > 0:
@@ -360,7 +365,6 @@ def show_chart(use_goapi):
         else:
             stop_loss, target_profit, tp_pct = close, close, 0
             
-        # TAMPILAN METRIK (4 KOLOM)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", wyckoff_phase)
         c2.metric("Target (TP) & Stop Loss", f"Rp {int(target_profit):,}", f"Cut Loss: Rp {int(stop_loss):,} (+{tp_pct:.1f}% TP)", delta_color="normal")
@@ -372,10 +376,13 @@ def show_chart(use_goapi):
         else:
             c3.metric("Foreign Flow (Asing)", "N/A", "Gunakan Mode GOAPI / Limit Habis", delta_color="off")
         
-        # Ekstrak Laba YoY
+        # Penanda ALL ABOVE MA
+        is_all_ma = "ALL ABOVE MA" in " ".join(reasons)
+        ma_status = "🔥 PERFECT UPTREND (All MA)" if is_all_ma else ("✅ BULLISH (>EMA200)" if not pd.isna(last.get('EMA200')) and close > last['EMA200'] else "❌ BEARISH")
         eps_g = fund.get('EPS_Growth') if fund else None
         laba_str = f"Laba (YoY): +{eps_g*100:.1f}% 🚀" if eps_g and eps_g > 0 else (f"Laba: {eps_g*100:.1f}% 🔻" if eps_g else "Laba: N/A")
-        c4.metric("Trend Mayor (>EMA200)", "✅ BULLISH" if not pd.isna(last.get('EMA200')) and close > last['EMA200'] else "❌ BEARISH", laba_str, delta_color="normal" if (eps_g and eps_g > 0) else "off")
+        
+        c4.metric("Status Trend Mayor", ma_status, laba_str, delta_color="normal" if (eps_g and eps_g > 0) else "off")
         
         if "BULLISH DIV" in divergence:
             st.success(f"🚨 **DIVERGENCE ALERT:** {divergence} - Peluang besar harga akan segera rebound!")
@@ -383,18 +390,21 @@ def show_chart(use_goapi):
             st.error(f"🚨 **DIVERGENCE ALERT:** {divergence} - Hati-hati, indikator distribusi di pucuk!")
         
         st.subheader(f"Visualisasi Grafik {ticker_only} & Titik Krusial")
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05, subplot_titles=("Harga, Target, & Trend Mayor", "Volume", "Bandar Flow (CMF)"))
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05, subplot_titles=("Harga, MA Pelangi, & Target", "Volume", "Bandar Flow (CMF)"))
         
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.5), name='MA20'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA200'], line=dict(color='purple', width=2.5), name='EMA200 (Mayor)'), row=1, col=1)
         
-        # Gambar Garis Target Profit (Hijau), Stop Loss (Merah), dan Modal Asing (Biru)
+        # --- MENAMPILKAN SEMUA GARIS MA (PELANGI) ---
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.5), name='MA20'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue', width=1.5), name='MA50'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA100'], line=dict(color='green', width=2), name='MA100'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA200'], line=dict(color='purple', width=2.5), name='EMA200'), row=1, col=1)
+        
         if atr > 0:
-            fig.add_hline(y=target_profit, line_dash="dash", line_color="green", annotation_text="Target Profit", row=1, col=1)
-            fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", annotation_text="Stop Loss", row=1, col=1)
+            fig.add_hline(y=target_profit, line_dash="dash", line_color="green", annotation_text=f"Target: Rp {int(target_profit):,}", row=1, col=1)
+            fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", annotation_text=f"Stop Loss: Rp {int(stop_loss):,}", row=1, col=1)
         if use_goapi and avg_buy_price > 0:
-            fig.add_hline(y=avg_buy_price, line_dash="dot", line_color="blue", annotation_text="Modal Asing", row=1, col=1)
+            fig.add_hline(y=avg_buy_price, line_dash="dot", line_color="blue", annotation_text=f"Modal Asing: Rp {int(avg_buy_price):,}", row=1, col=1)
         
         _, patterns = check_candlestick_patterns(df.iloc[-1], df.iloc[-2])
         if patterns: fig.add_annotation(x=df.index[-1], y=df['High'].iloc[-1], text=patterns[0], showarrow=True, arrowhead=1, row=1, col=1)
