@@ -12,6 +12,9 @@ from datetime import datetime, timedelta
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", page_icon="🏦")
 
+# --- DAFTAR ADMIN ---
+ADMIN_USERS = ["bos_besar", "admin_utama", "aprasetio"] 
+
 # --- 2. SISTEM LOGIN AMAN ---
 def check_password():
     def password_entered():
@@ -46,7 +49,7 @@ if not check_password():
 
 # --- 3. AMBIL DATA RAHASIA DARI STREAMLIT SECRETS ---
 GOAPI_KEY = st.secrets["GOAPI_KEY"]
-ADMIN_USERS = st.secrets.get("ADMIN_USERS", []) # Mengambil list admin dengan aman
+admin_list = st.secrets.get("ADMIN_USERS", ADMIN_USERS)
 
 # --- 4. CSS FIX ---
 st.markdown("""
@@ -95,13 +98,14 @@ def get_goapi_target_date(df):
     else:
         return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 7. FUNGSI FETCH GOAPI ---
+# --- 7. FUNGSI FETCH GOAPI (ANTI-BLOKIR DENGAN ERROR LOGGER) ---
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
+    # KEMBALI MENGGUNAKAN TOPENG LENGKAP AGAR TIDAK DITOLAK CLOUDFLARE
     headers = {
         'accept': 'application/json', 
         'X-API-KEY': GOAPI_KEY,
-        'User-Agent': 'Mozilla/5.0'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     net_foreign = 0
     avg_buy_price = 0
@@ -111,7 +115,11 @@ def fetch_goapi_foreign_flow(symbol, target_date):
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
-        if res_broker.status_code != 200: return None, 0, None
+        
+        # MUNCULKAN ERROR JIKA DIBLOKIR ATAU KENA LIMIT!
+        if res_broker.status_code != 200:
+            st.sidebar.error(f"🚨 GOAPI Error pada {symbol}: {res_broker.status_code} - {res_broker.text[:60]}")
+            return None, 0, None
         
         res_broker_json = res_broker.json()
         total_buy_val, total_buy_lot, total_sell_val = 0, 0, 0
@@ -127,8 +135,14 @@ def fetch_goapi_foreign_flow(symbol, target_date):
             net_foreign = total_buy_val - total_sell_val
             if total_buy_lot > 0:
                 avg_buy_price = total_buy_val / (total_buy_lot * 100)
+        else:
+            # Jika JSON membalas sukses tapi datanya kosong/error
+            st.sidebar.warning(f"⚠️ Data GOAPI untuk {symbol} kosong/tidak ditemukan.")
                 
-    except: return None, 0, None
+    except Exception as e: 
+        st.sidebar.error(f"🔌 Koneksi ke GOAPI Terputus: {e}")
+        return None, 0, None
+        
     return net_foreign, avg_buy_price, fetch_time
 
 # --- 8. FUNGSI FETCH FUNDAMENTAL ---
@@ -259,7 +273,7 @@ def score_analysis(df, fund_data):
 # --- 10. FITUR SCREENER ---
 def run_screener(use_goapi):
     st.header("🔍 Smart Money Screener (Optimized)")
-    if use_goapi: st.success("🏦 Mode GOAPI VIP: Memfilter Foreign Flow & Harga Modal Bandar (Akurat & Hemat Kuota).")
+    if use_goapi: st.success("🏦 Mode GOAPI VIP: Memfilter Foreign Flow & Harga Modal Bandar.")
     else: st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Berdasarkan CMF Bandar).")
     
     if st.button("MULAI SCANNING"):
@@ -338,7 +352,8 @@ def run_screener(use_goapi):
                     "Rek": rec,
                     "Alasan Utama": " | ".join(reasons)
                 })
-            except: continue
+            except Exception as loop_e: 
+                continue
             
         progress.empty()
         status.empty()
@@ -352,7 +367,7 @@ def run_screener(use_goapi):
                 st.caption(f"📅 **Data Bursa Per:** {last_bursa_date} | 🌐 **Sumber Bandar:** Yahoo Finance")
             st.dataframe(df_res, use_container_width=True)
         else:
-            st.warning("Data kosong / Tidak ada saham yang masuk kriteria.")
+            st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
 
 # --- 11. FITUR CHART DETAIL ---
 def show_chart(use_goapi):
@@ -371,6 +386,10 @@ def show_chart(use_goapi):
         ticker_only = ticker.replace(".JK", "")
         
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
+        if df.empty:
+            st.error("Saham tidak ditemukan di Yahoo Finance!")
+            return
+
         df = calculate_metrics(df)
         fund = get_fundamental_info(symbol)
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
@@ -389,7 +408,7 @@ def show_chart(use_goapi):
         if use_goapi and fetch_time:
             st.caption(f"📅 **Harga Per:** {last_date_disp} | 🔄 **Asing Diambil Tgl:** {goapi_date} (Sync: {fetch_time})")
         else:
-            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Estimasi / Mode Gratis)")
+            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Atau Koneksi GOAPI Terputus)")
         
         atr = last.get('ATR', 0)
         close = last['Close']
@@ -409,7 +428,7 @@ def show_chart(use_goapi):
             modal_str = f"Modal Bandar: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else "Modal: -"
             c3.metric(f"Asing ({foreign_label})", format_rupiah(net_foreign), modal_str, delta_color="normal" if net_foreign > 0 else "inverse")
         else:
-            c3.metric("Foreign Flow (Asing)", "N/A", "Gunakan Mode GOAPI / Limit Habis", delta_color="off")
+            c3.metric("Foreign Flow (Asing)", "N/A", "Terjadi Error/Limit pada Koneksi GOAPI", delta_color="off")
         
         is_all_ma = "ALL ABOVE MA" in " ".join(reasons)
         ma_status = "🔥 PERFECT UPTREND (All MA)" if is_all_ma else ("✅ BULLISH (>EMA200)" if not pd.isna(last.get('EMA200')) and close > last['EMA200'] else "❌ BEARISH")
@@ -461,13 +480,13 @@ use_goapi = "GOAPI" in data_source
 
 st.sidebar.divider()
 
-# --- FITUR ADMIN: HANYA MUNCUL JIKA USERNAME ADA DI LIST ADMIN_USERS ---
+# --- FITUR ADMIN ---
 current_user = st.session_state.get('username', '')
-if current_user in ADMIN_USERS:
+if current_user in admin_list:
     st.sidebar.markdown("👑 **Admin Panel**")
     if st.sidebar.button("🧹 Bersihkan Memori (Refresh Data)"):
         st.cache_data.clear()
-        st.sidebar.success("✅ Memori berhasil dihapus! Silakan klik Mulai Scanning lagi untuk menarik data terbaru.")
+        st.sidebar.success("✅ Memori berhasil dihapus! Silakan cari saham lagi.")
     st.sidebar.divider()
 
 st.sidebar.markdown(f"👤 Login sebagai: **{current_user}**")
