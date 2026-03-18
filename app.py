@@ -62,7 +62,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 5. DAFTAR SAHAM ---
-# Lapis 1: JII30 (Blue Chips)
 SHARIA_STOCKS = [
     "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
     "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
@@ -70,7 +69,6 @@ SHARIA_STOCKS = [
     "AMRT", "ASII", "TPIA"
 ]
 
-# Lapis 2: JII70 / ISSI Pilihan (Mid-Small Caps Agresif)
 SHARIA_MIDCAP_STOCKS = [
     "BRMS", "ELSA", "ENRG", "PTRO", "SIDO", "MYOR", "ESSA", "CTRA", "BSDE",
     "SMRA", "PWON", "ARTO", "BTPS", "MIKA", "HEAL", "SILO", "MAPA", "AUTO",
@@ -105,7 +103,17 @@ def get_goapi_target_date(df):
     else:
         return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 7. FUNGSI FETCH GOAPI ---
+# --- 7. FUNGSI FETCH IHSG & FUNDAMENTAL & GOAPI ---
+@st.cache_data(ttl=3600)
+def get_ihsg_data():
+    """Mengambil pergerakan harga IHSG sebagai Benchmark (Tolok Ukur)"""
+    try:
+        ihsg = yf.download("^JKSE", period="1y", auto_adjust=True, progress=False)
+        ihsg = fix_dataframe(ihsg)
+        return ihsg[['Close']].rename(columns={'Close': 'IHSG_Close'})
+    except:
+        return pd.DataFrame()
+
 @st.cache_data(ttl=43200)
 def fetch_goapi_foreign_flow(symbol, target_date):
     headers = {
@@ -113,8 +121,7 @@ def fetch_goapi_foreign_flow(symbol, target_date):
         'X-API-KEY': GOAPI_KEY,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
-    net_foreign = 0
-    avg_buy_price = 0
+    net_foreign, avg_buy_price = 0, 0
     wib_time = datetime.utcnow() + timedelta(hours=7)
     fetch_time = wib_time.strftime("%d %b %Y, %H:%M WIB")
     
@@ -139,14 +146,12 @@ def fetch_goapi_foreign_flow(symbol, target_date):
             net_foreign = total_buy_val - total_sell_val
             if total_buy_lot > 0:
                 avg_buy_price = total_buy_val / (total_buy_lot * 100)
-                
     except Exception as e: 
         st.sidebar.error(f"🔌 Koneksi GOAPI Terputus: {e}")
         return None, 0, None
         
     return net_foreign, avg_buy_price, fetch_time
 
-# --- 8. FUNGSI FETCH FUNDAMENTAL ---
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
@@ -161,7 +166,7 @@ def get_fundamental_info(symbol):
         }
     except: return None
 
-# --- 9. FUNGSI TEKNIKAL ---
+# --- 8. FUNGSI TEKNIKAL & RELATIVE STRENGTH ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -181,7 +186,7 @@ def check_candlestick_patterns(curr, prev):
     except: pass
     return score, patterns
 
-def calculate_metrics(df):
+def calculate_metrics(df, ihsg_df=None):
     df = fix_dataframe(df)
     try:
         df['Rsi'] = df.ta.rsi(length=14)
@@ -194,20 +199,26 @@ def calculate_metrics(df):
         df['EMA200'] = df.ta.ema(length=200)
         df['ATR'] = df.ta.atr(length=14)
         
-        change = abs(df['Close'] - df['Close'].shift(14))
-        volatility = abs(df['Close'] - df['Close'].shift(1)).rolling(window=14).sum()
-        df['ER'] = change / volatility
-        
         df = pd.concat([df, macd, bbands], axis=1)
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low'])) * df['Volume']
         df['CMF'] = ad.fillna(0).rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
+        
+        # SUNTIKAN LOGIKA RRG (RELATIVE STRENGTH vs IHSG)
+        if ihsg_df is not None and not ihsg_df.empty:
+            # Menggabungkan data IHSG ke dataframe saham berdasarkan tanggal
+            df = df.join(ihsg_df, how='left')
+            df['IHSG_Close'] = df['IHSG_Close'].ffill() # Mengisi hari libur yang mungkin bolong
+            
+            # Hitung perbandingan momentum 20 Hari (1 Bulan)
+            df['Stock_Ret_20'] = (df['Close'] - df['Close'].shift(20)) / df['Close'].shift(20)
+            df['IHSG_Ret_20'] = (df['IHSG_Close'] - df['IHSG_Close'].shift(20)) / df['IHSG_Close'].shift(20)
+            
     except: pass
     return df
 
 def advanced_analysis(df):
-    if len(df) < 15: return "N/A", "-", 0
+    if len(df) < 15: return "N/A", "-"
     curr = df.iloc[-1]
-    er_val = curr.get('ER', 0)
     
     close, ma20, ma50, cmf = curr['Close'], curr['SMA20'], curr['SMA50'], curr['CMF']
     phase = "Sideways/Noise"
@@ -223,7 +234,7 @@ def advanced_analysis(df):
         if price_trend < 0 and cmf_trend > 0.15: divergence = "🟢 BULLISH DIV"
         elif price_trend > 0 and cmf_trend < -0.15: divergence = "🔴 BEARISH DIV"
             
-    return phase, divergence, er_val
+    return phase, divergence
 
 def score_analysis(df, fund_data):
     if df.empty or len(df)<2: return 0, 0, 0, 0, ["Data Kurang"], df.iloc[-1]
@@ -232,24 +243,32 @@ def score_analysis(df, fund_data):
     score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0
     reasons = []
     
+    # 1. Logika All Above MA (Super Uptrend)
     is_all_above_ma = False
     if not pd.isna(curr.get('SMA100')) and not pd.isna(curr.get('EMA200')):
-        if (curr['Close'] > curr['SMA20'] and 
-            curr['Close'] > curr['SMA50'] and 
-            curr['Close'] > curr['SMA100'] and 
-            curr['Close'] > curr['EMA200']):
+        if (curr['Close'] > curr['SMA20'] and curr['Close'] > curr['SMA50'] and 
+            curr['Close'] > curr['SMA100'] and curr['Close'] > curr['EMA200']):
             is_all_above_ma = True
             score_tech += 2  
-            reasons.append("🔥 ALL ABOVE MA (Super Uptrend)")
-    
+            reasons.append("🔥 ALL ABOVE MA")
+            
     if not is_all_above_ma and not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
         score_tech += 1
-        reasons.append("📈 Tren Mayor Naik (> EMA200)")
+        reasons.append("📈 Tren Mayor Naik")
+
+    # 2. Logika RRG (Relative Strength vs IHSG)
+    if 'Stock_Ret_20' in df.columns and 'IHSG_Ret_20' in df.columns:
+        stock_ret = curr['Stock_Ret_20']
+        ihsg_ret = curr['IHSG_Ret_20']
+        if not pd.isna(stock_ret) and not pd.isna(ihsg_ret):
+            if stock_ret > ihsg_ret:
+                score_tech += 1.5 # Tambahan skor khusus karena mengalahkan pasar
+                reasons.append(f"🌟 Outperform IHSG")
         
     cmf = curr.get('CMF', 0)
-    if cmf > 0.1: score_bandar = 2; reasons.append("🐳 CMF: Akumulasi Besar")
+    if cmf > 0.1: score_bandar = 2; reasons.append("🐳 Akumulasi CMF")
     elif cmf > 0.05: score_bandar = 1
-    elif cmf < -0.1: score_bandar = -2; reasons.append("🔻 CMF: Distribusi")
+    elif cmf < -0.1: score_bandar = -2; reasons.append("🔻 Distribusi CMF")
         
     if curr.get('MACD_12_26_9', 0) > curr.get('MACDs_12_26_9', 0): score_tech += 1
     rsi = curr.get('Rsi', 50)
@@ -262,7 +281,7 @@ def score_analysis(df, fund_data):
         if pbv and pbv < 1.5: score_fund += 2
         if eps_g and eps_g > 0.10: 
             score_fund += 2
-            reasons.append(f"🚀 Laba Tumbuh +{eps_g*100:.1f}%")
+            reasons.append(f"🚀 Laba Tumbuh")
         
     s_candle, patterns = check_candlestick_patterns(curr, prev)
     score_candle += s_candle
@@ -270,7 +289,7 @@ def score_analysis(df, fund_data):
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
-# --- 10. FITUR SCREENER ---
+# --- 9. FITUR SCREENER ---
 def run_screener(use_goapi, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     if use_goapi: 
@@ -284,11 +303,12 @@ def run_screener(use_goapi, stock_list, category_name):
         results = []
         tickers = [f"{s}.JK" for s in stock_list]
         
+        status.text("Mengambil Data IHSG (Benchmark)...")
+        ihsg_df = get_ihsg_data()
+        
         price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
-        last_sync_time = None 
-        last_bursa_date = None
-        goapi_date_used = None
+        last_sync_time, last_bursa_date, goapi_date_used = None, None, None
         
         for i, t in enumerate(tickers):
             status.text(f"Menganalisa Saham: {t} ...")
@@ -298,14 +318,14 @@ def run_screener(use_goapi, stock_list, category_name):
                 df = price_data[t].copy()
                 df = fix_dataframe(df)
                 if df.empty or len(df) < 50: continue
-                # Longgarkan syarat volume untuk lapis 2 (Minimal 2 Juta lembar/hari agar tidak terlalu sepi)
                 min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
                 if df['Volume'].iloc[-1] < min_vol: continue
                 
-                df = calculate_metrics(df)
+                # MENGHITUNG METRIK TERMASUK RELATIVE STRENGTH IHSG
+                df = calculate_metrics(df, ihsg_df)
                 fund = get_fundamental_info(t)
                 s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
-                wyckoff_phase, divergence, er_val = advanced_analysis(df)
+                wyckoff_phase, divergence = advanced_analysis(df)
                 total_score = s_tech + s_fund + s_bandar + s_candle
                 
                 atr = last.get('ATR', 0)
@@ -329,9 +349,7 @@ def run_screener(use_goapi, stock_list, category_name):
                     continue
                 
                 symbol_only = t.replace(".JK", "")
-                net_foreign = None
-                avg_buy_price = 0
-                power_pct = 0
+                net_foreign, avg_buy_price, power_pct = None, 0, 0
                 
                 goapi_date = get_goapi_target_date(df)
                 goapi_date_used = goapi_date
@@ -340,26 +358,25 @@ def run_screener(use_goapi, stock_list, category_name):
                 if use_goapi:
                     status.text(f"Menarik Data GOAPI: {t} ...")
                     time.sleep(1) 
-                    
                     net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(symbol_only, goapi_date)
                     if fetch_time: last_sync_time = fetch_time 
-                    
                     if net_foreign is not None and net_foreign <= 0: continue
                 
                 if net_foreign is not None:
-                    if daily_turnover > 0:
-                        power_pct = (abs(net_foreign) / daily_turnover) * 100
-                        
+                    if daily_turnover > 0: power_pct = (abs(net_foreign) / daily_turnover) * 100
                     power_str = f" 🔥 (Power: {power_pct:.1f}%)" if power_pct >= 10 else f" (Power: {power_pct:.1f}%)"
                     modal_str = f" Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else ""
                     reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}{power_str} |{modal_str}")
+
+                # Menarik Status IHSG untuk ditampilkan di Tabel
+                status_ihsg = "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform"
 
                 results.append({
                     "Kode": symbol_only,
                     "Harga": int(close),
                     "Area TP / SL": f"Rp {int(target_profit):,} / Rp {int(stop_loss):,}",
                     "Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
-                    "Net Foreign": format_rupiah(net_foreign) if net_foreign is not None else "N/A",
+                    "RRG vs IHSG": status_ihsg,
                     "Dominasi Asing": f"{power_pct:.1f}%" if use_goapi and net_foreign is not None else "-",
                     "Rek": rec,
                     "Alasan Utama": " | ".join(reasons)
@@ -381,7 +398,7 @@ def run_screener(use_goapi, stock_list, category_name):
         else:
             st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
 
-# --- 11. FITUR CHART DETAIL ---
+# --- 10. FITUR CHART DETAIL ---
 def show_chart(use_goapi):
     st.header("📊 Deep Analysis & Target Tracker")
     
@@ -397,15 +414,16 @@ def show_chart(use_goapi):
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
         ticker_only = ticker.replace(".JK", "")
         
+        ihsg_df = get_ihsg_data()
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
         if df.empty:
             st.error("Saham tidak ditemukan di Yahoo Finance!")
             return
 
-        df = calculate_metrics(df)
+        df = calculate_metrics(df, ihsg_df)
         fund = get_fundamental_info(symbol)
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
-        wyckoff_phase, divergence, er_val = advanced_analysis(df)
+        wyckoff_phase, divergence = advanced_analysis(df)
         
         net_foreign, avg_buy_price, fetch_time = None, 0, None
         
@@ -447,12 +465,13 @@ def show_chart(use_goapi):
         else:
             c3.metric("Foreign Flow (Asing)", "Dinonaktifkan", "Mode Lapis 2 / Batas API Habis", delta_color="off")
         
-        is_all_ma = "ALL ABOVE MA" in " ".join(reasons)
-        ma_status = "🔥 PERFECT UPTREND (All MA)" if is_all_ma else ("✅ BULLISH (>EMA200)" if not pd.isna(last.get('EMA200')) and close > last['EMA200'] else "❌ BEARISH")
+        # Penanda RRG (Outperform IHSG)
+        is_outperform = "🌟 Outperform IHSG" in " ".join(reasons)
+        rrg_status = "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM"
         eps_g = fund.get('EPS_Growth') if fund else None
-        laba_str = f"Laba (YoY): +{eps_g*100:.1f}% 🚀" if eps_g and eps_g > 0 else (f"Laba: {eps_g*100:.1f}% 🔻" if eps_g else "Laba: N/A")
+        laba_str = f"Laba: +{eps_g*100:.1f}% 🚀" if eps_g and eps_g > 0 else (f"Laba: {eps_g*100:.1f}% 🔻" if eps_g else "Laba: N/A")
         
-        c4.metric("Status Trend Mayor", ma_status, laba_str, delta_color="normal" if (eps_g and eps_g > 0) else "off")
+        c4.metric("Status vs Pasar (RRG)", rrg_status, laba_str, delta_color="normal" if is_outperform else "off")
         
         if "BULLISH DIV" in divergence:
             st.success(f"🚨 **DIVERGENCE ALERT:** {divergence} - Peluang besar harga akan segera rebound!")
@@ -488,7 +507,7 @@ def show_chart(use_goapi):
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 12. PENGATURAN SIDEBAR & AKUN ---
+# --- 11. PENGATURAN SIDEBAR & AKUN ---
 st.sidebar.header("⚙️ Pengaturan")
 mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Chart"])
 st.sidebar.divider()
@@ -498,7 +517,7 @@ kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30 / Blu
 
 # Logika Penghematan Kuota GOAPI
 if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
-    st.sidebar.info("⚡ Mode Lapis 2 otomatis mematikan GOAPI untuk menghemat limit. Menggunakan 100% Yahoo Finance.")
+    st.sidebar.info("⚡ Mode Lapis 2 mematikan GOAPI untuk hemat limit. 100% Yahoo Finance.")
     use_goapi = False
     active_stock_list = SHARIA_MIDCAP_STOCKS
     active_category_name = "Lapis 2 (Mid-Small Caps)"
