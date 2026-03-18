@@ -61,12 +61,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 5. DAFTAR SAHAM (JII 30) ---
+# --- 5. DAFTAR SAHAM ---
+# Lapis 1: JII30 (Blue Chips)
 SHARIA_STOCKS = [
     "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
     "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
     "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", 
     "AMRT", "ASII", "TPIA"
+]
+
+# Lapis 2: JII70 / ISSI Pilihan (Mid-Small Caps Agresif)
+SHARIA_MIDCAP_STOCKS = [
+    "BRMS", "ELSA", "ENRG", "PTRO", "SIDO", "MYOR", "ESSA", "CTRA", "BSDE",
+    "SMRA", "PWON", "ARTO", "BTPS", "MIKA", "HEAL", "SILO", "MAPA", "AUTO",
+    "SMSM", "TAPG", "DSNG", "LSIP", "AALI", "WIKA", "PTPP", "TOTL", "NRCA",
+    "SCMA", "MNCN", "ERAA"
 ]
 
 # --- 6. HELPER FUNCTIONS ---
@@ -262,16 +271,18 @@ def score_analysis(df, fund_data):
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
 # --- 10. FITUR SCREENER ---
-def run_screener(use_goapi):
-    st.header("🔍 Smart Money Screener (Optimized)")
-    if use_goapi: st.success("🏦 Mode GOAPI VIP: Memfilter Foreign Flow & Harga Modal Bandar.")
-    else: st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Berdasarkan CMF Bandar).")
+def run_screener(use_goapi, stock_list, category_name):
+    st.header(f"🔍 Smart Money Screener ({category_name})")
+    if use_goapi: 
+        st.success("🏦 Mode GOAPI VIP: Memfilter Foreign Flow & Harga Modal Bandar.")
+    else: 
+        st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Fokus Pergerakan Bandar Lokal & Teknikal).")
     
     if st.button("MULAI SCANNING"):
         progress = st.progress(0)
         status = st.empty()
         results = []
-        tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
+        tickers = [f"{s}.JK" for s in stock_list]
         
         price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
@@ -280,14 +291,16 @@ def run_screener(use_goapi):
         goapi_date_used = None
         
         for i, t in enumerate(tickers):
-            status.text(f"Analisa Lapis 1 (Yahoo): {t} ...")
+            status.text(f"Menganalisa Saham: {t} ...")
             progress.progress((i+1)/len(tickers))
             
             try:
                 df = price_data[t].copy()
                 df = fix_dataframe(df)
                 if df.empty or len(df) < 50: continue
-                if df['Volume'].iloc[-1] < 5000000: continue
+                # Longgarkan syarat volume untuk lapis 2 (Minimal 2 Juta lembar/hari agar tidak terlalu sepi)
+                min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
+                if df['Volume'].iloc[-1] < min_vol: continue
                 
                 df = calculate_metrics(df)
                 fund = get_fundamental_info(t)
@@ -298,7 +311,7 @@ def run_screener(use_goapi):
                 atr = last.get('ATR', 0)
                 close = last['Close']
                 volume = last['Volume']
-                daily_turnover = close * volume  # TOTAL TRANSAKSI HARIAN (RUPIAH)
+                daily_turnover = close * volume 
                 
                 if atr > 0:
                     stop_loss = close - (1.5 * atr) 
@@ -325,7 +338,7 @@ def run_screener(use_goapi):
                 last_bursa_date = df.index[-1].strftime('%d %b %Y') 
                 
                 if use_goapi:
-                    status.text(f"Analisa Lapis 2 (GOAPI - Cek Asing): {t} ...")
+                    status.text(f"Menarik Data GOAPI: {t} ...")
                     time.sleep(1) 
                     
                     net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(symbol_only, goapi_date)
@@ -334,7 +347,6 @@ def run_screener(use_goapi):
                     if net_foreign is not None and net_foreign <= 0: continue
                 
                 if net_foreign is not None:
-                    # MENGHITUNG PERSENTASE DOMINASI ASING
                     if daily_turnover > 0:
                         power_pct = (abs(net_foreign) / daily_turnover) * 100
                         
@@ -376,7 +388,7 @@ def show_chart(use_goapi):
     with st.form(key='chart_search_form'):
         c_input, c_btn = st.columns([4, 1])
         with c_input:
-            ticker = st.text_input("Masukkan Kode Saham (Contoh: BBRI, TLKM, ADRO)", "").upper()
+            ticker = st.text_input("Masukkan Kode Saham (Contoh: BRMS, ELSA, PTBA)", "").upper()
         with c_btn:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_search = st.form_submit_button("Cari Saham 🔍")
@@ -408,7 +420,7 @@ def show_chart(use_goapi):
         if use_goapi and fetch_time:
             st.caption(f"📅 **Harga Per:** {last_date_disp} | 🔄 **Asing Diambil Tgl:** {goapi_date} (Sync: {fetch_time})")
         else:
-            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Estimasi / Mode Gratis)")
+            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Estimasi / Tanpa Asing)")
         
         atr = last.get('ATR', 0)
         close = last['Close']
@@ -430,13 +442,10 @@ def show_chart(use_goapi):
             power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
             foreign_label = "🟢 AKUMULASI" if net_foreign > 0 else ("🔴 DISTRIBUSI" if net_foreign < 0 else "⚪ NETRAL")
             power_info = f"Dominasi Asing: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else f"Dominasi Asing: {power_pct:.1f}%"
-            
-            # Jika dominasi sangat besar (>10%), beri highlight!
             if power_pct >= 10: power_info = "🔥 " + power_info
-            
             c3.metric(f"Asing ({foreign_label})", format_rupiah(net_foreign), power_info, delta_color="normal" if net_foreign > 0 else "inverse")
         else:
-            c3.metric("Foreign Flow (Asing)", "N/A", "Terjadi Error/Limit pada Koneksi GOAPI", delta_color="off")
+            c3.metric("Foreign Flow (Asing)", "Dinonaktifkan", "Mode Lapis 2 / Batas API Habis", delta_color="off")
         
         is_all_ma = "ALL ABOVE MA" in " ".join(reasons)
         ma_status = "🔥 PERFECT UPTREND (All MA)" if is_all_ma else ("✅ BULLISH (>EMA200)" if not pd.isna(last.get('EMA200')) and close > last['EMA200'] else "❌ BEARISH")
@@ -483,8 +492,21 @@ def show_chart(use_goapi):
 st.sidebar.header("⚙️ Pengaturan")
 mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Chart"])
 st.sidebar.divider()
-data_source = st.sidebar.radio("Sumber Data Bandar:", ["🌐 Yahoo Finance (Unlimited/Estimasi)", "🏦 GOAPI (Akurat/Limit Harian)"])
-use_goapi = "GOAPI" in data_source
+
+# --- PILIHAN KATEGORI SAHAM ---
+kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30 / Blue Chips)", "🚀 Lapis 2 (Mid-Small Caps)"])
+
+# Logika Penghematan Kuota GOAPI
+if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
+    st.sidebar.info("⚡ Mode Lapis 2 otomatis mematikan GOAPI untuk menghemat limit. Menggunakan 100% Yahoo Finance.")
+    use_goapi = False
+    active_stock_list = SHARIA_MIDCAP_STOCKS
+    active_category_name = "Lapis 2 (Mid-Small Caps)"
+else:
+    data_source = st.sidebar.radio("Sumber Data Bandar:", ["🌐 Yahoo Finance (Estimasi)", "🏦 GOAPI (Akurat/Limit Harian)"])
+    use_goapi = "GOAPI" in data_source
+    active_stock_list = SHARIA_STOCKS
+    active_category_name = "Lapis 1 (JII30)"
 
 st.sidebar.divider()
 
@@ -502,5 +524,8 @@ if st.sidebar.button("Keluar (Logout)"):
     st.session_state["password_correct"] = False
     st.rerun()
 
-if mode == "🔍 Super Screener": run_screener(use_goapi)
-else: show_chart(use_goapi)
+# --- MENJALANKAN APLIKASI ---
+if mode == "🔍 Super Screener": 
+    run_screener(use_goapi, active_stock_list, active_category_name)
+else: 
+    show_chart(use_goapi)
