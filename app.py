@@ -47,11 +47,22 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 3. AMBIL DATA RAHASIA DARI STREAMLIT SECRETS ---
+# --- 3. AMBIL DATA RAHASIA & STATUS ADMIN ---
 GOAPI_KEY = st.secrets["GOAPI_KEY"]
 admin_list = st.secrets.get("ADMIN_USERS", ADMIN_USERS)
 
-# --- 4. CSS FIX ---
+current_user = st.session_state.get('username', '')
+is_admin = current_user in admin_list
+
+# --- 4. BUKU TAMU GLOBAL (SHARED CACHE REGISTRY) ---
+# Menyimpan riwayat saham apa saja yang sudah ditarik API-nya hari ini
+@st.cache_resource
+def get_api_registry():
+    return set()
+
+api_registry = get_api_registry()
+
+# --- 5. CSS FIX ---
 st.markdown("""
 <style>
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
@@ -61,7 +72,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 5. DAFTAR SAHAM ---
+# --- 6. DAFTAR SAHAM ---
 SHARIA_STOCKS = [
     "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
     "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
@@ -76,7 +87,7 @@ SHARIA_MIDCAP_STOCKS = [
     "SCMA", "MNCN", "ERAA"
 ]
 
-# --- 6. HELPER FUNCTIONS ---
+# --- 7. HELPER FUNCTIONS ---
 def fix_dataframe(df):
     if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -103,10 +114,9 @@ def get_goapi_target_date(df):
     else:
         return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 7. FUNGSI FETCH IHSG & FUNDAMENTAL & GOAPI ---
+# --- 8. FUNGSI FETCH IHSG & FUNDAMENTAL & GOAPI ---
 @st.cache_data(ttl=3600)
 def get_ihsg_data():
-    """Mengambil pergerakan harga IHSG sebagai Benchmark (Tolok Ukur)"""
     try:
         ihsg = yf.download("^JKSE", period="1y", auto_adjust=True, progress=False)
         ihsg = fix_dataframe(ihsg)
@@ -166,7 +176,7 @@ def get_fundamental_info(symbol):
         }
     except: return None
 
-# --- 8. FUNGSI TEKNIKAL & RELATIVE STRENGTH ---
+# --- 9. FUNGSI TEKNIKAL & RELATIVE STRENGTH ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -203,13 +213,9 @@ def calculate_metrics(df, ihsg_df=None):
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low'])) * df['Volume']
         df['CMF'] = ad.fillna(0).rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
         
-        # SUNTIKAN LOGIKA RRG (RELATIVE STRENGTH vs IHSG)
         if ihsg_df is not None and not ihsg_df.empty:
-            # Menggabungkan data IHSG ke dataframe saham berdasarkan tanggal
             df = df.join(ihsg_df, how='left')
-            df['IHSG_Close'] = df['IHSG_Close'].ffill() # Mengisi hari libur yang mungkin bolong
-            
-            # Hitung perbandingan momentum 20 Hari (1 Bulan)
+            df['IHSG_Close'] = df['IHSG_Close'].ffill() 
             df['Stock_Ret_20'] = (df['Close'] - df['Close'].shift(20)) / df['Close'].shift(20)
             df['IHSG_Ret_20'] = (df['IHSG_Close'] - df['IHSG_Close'].shift(20)) / df['IHSG_Close'].shift(20)
             
@@ -243,7 +249,6 @@ def score_analysis(df, fund_data):
     score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0
     reasons = []
     
-    # 1. Logika All Above MA (Super Uptrend)
     is_all_above_ma = False
     if not pd.isna(curr.get('SMA100')) and not pd.isna(curr.get('EMA200')):
         if (curr['Close'] > curr['SMA20'] and curr['Close'] > curr['SMA50'] and 
@@ -256,13 +261,12 @@ def score_analysis(df, fund_data):
         score_tech += 1
         reasons.append("📈 Tren Mayor Naik")
 
-    # 2. Logika RRG (Relative Strength vs IHSG)
     if 'Stock_Ret_20' in df.columns and 'IHSG_Ret_20' in df.columns:
         stock_ret = curr['Stock_Ret_20']
         ihsg_ret = curr['IHSG_Ret_20']
         if not pd.isna(stock_ret) and not pd.isna(ihsg_ret):
             if stock_ret > ihsg_ret:
-                score_tech += 1.5 # Tambahan skor khusus karena mengalahkan pasar
+                score_tech += 1.5 
                 reasons.append(f"🌟 Outperform IHSG")
         
     cmf = curr.get('CMF', 0)
@@ -289,11 +293,11 @@ def score_analysis(df, fund_data):
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
-# --- 9. FITUR SCREENER ---
+# --- 10. FITUR SCREENER ---
 def run_screener(use_goapi, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     if use_goapi: 
-        st.success("🏦 Mode GOAPI VIP: Memfilter Foreign Flow & Harga Modal Bandar.")
+        st.success("🏦 Mode GOAPI: Memfilter Foreign Flow & Harga Modal Bandar aktif.")
     else: 
         st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Fokus Pergerakan Bandar Lokal & Teknikal).")
     
@@ -321,7 +325,6 @@ def run_screener(use_goapi, stock_list, category_name):
                 min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
                 if df['Volume'].iloc[-1] < min_vol: continue
                 
-                # MENGHITUNG METRIK TERMASUK RELATIVE STRENGTH IHSG
                 df = calculate_metrics(df, ihsg_df)
                 fund = get_fundamental_info(t)
                 s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
@@ -360,6 +363,10 @@ def run_screener(use_goapi, stock_list, category_name):
                     time.sleep(1) 
                     net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(symbol_only, goapi_date)
                     if fetch_time: last_sync_time = fetch_time 
+                    
+                    # Mencatat keberhasilan ke Buku Tamu Global
+                    api_registry.add(f"{symbol_only}_{goapi_date}")
+                    
                     if net_foreign is not None and net_foreign <= 0: continue
                 
                 if net_foreign is not None:
@@ -368,7 +375,6 @@ def run_screener(use_goapi, stock_list, category_name):
                     modal_str = f" Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else ""
                     reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}{power_str} |{modal_str}")
 
-                # Menarik Status IHSG untuk ditampilkan di Tabel
                 status_ihsg = "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform"
 
                 results.append({
@@ -398,7 +404,7 @@ def run_screener(use_goapi, stock_list, category_name):
         else:
             st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
 
-# --- 10. FITUR CHART DETAIL ---
+# --- 11. FITUR CHART DETAIL ---
 def show_chart(use_goapi):
     st.header("📊 Deep Analysis & Target Tracker")
     
@@ -430,8 +436,18 @@ def show_chart(use_goapi):
         goapi_date = get_goapi_target_date(df)
         last_date_disp = df.index[-1].strftime('%d %b %Y')
         
+        # --- PERLINDUNGAN KUOTA (SMART WHITELIST) ---
+        cache_key = f"{ticker_only}_{goapi_date}"
+        if use_goapi and not is_admin:
+            if cache_key not in api_registry:
+                st.info(f"ℹ️ **Info:** Saham {ticker_only} belum terdapat di dalam data Smart Screener hari ini. Aplikasi otomatis menggunakan data Yahoo Finance.")
+                use_goapi = False # Paksa matikan GOAPI agar tidak memakan limit baru
+        
         if use_goapi:
             net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(ticker_only, goapi_date)
+            # Jika admin yang menarik data baru, catat di buku tamu agar user lain bisa melihatnya nanti
+            if is_admin:
+                api_registry.add(cache_key)
             
         st.divider()
         
@@ -463,9 +479,8 @@ def show_chart(use_goapi):
             if power_pct >= 10: power_info = "🔥 " + power_info
             c3.metric(f"Asing ({foreign_label})", format_rupiah(net_foreign), power_info, delta_color="normal" if net_foreign > 0 else "inverse")
         else:
-            c3.metric("Foreign Flow (Asing)", "Dinonaktifkan", "Mode Lapis 2 / Batas API Habis", delta_color="off")
+            c3.metric("Foreign Flow (Asing)", "Dinonaktifkan", "Dialihkan ke Mode Yahoo Finance", delta_color="off")
         
-        # Penanda RRG (Outperform IHSG)
         is_outperform = "🌟 Outperform IHSG" in " ".join(reasons)
         rrg_status = "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM"
         eps_g = fund.get('EPS_Growth') if fund else None
@@ -507,35 +522,42 @@ def show_chart(use_goapi):
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 11. PENGATURAN SIDEBAR & AKUN ---
-st.sidebar.header("⚙️ Pengaturan")
-mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Chart"])
+# --- 12. PENGATURAN SIDEBAR & AKUN ---
+st.sidebar.header("⚙️ Pengaturan Menu")
+mode = st.sidebar.radio("Pilih Menu Utama:", ["🔍 Super Screener", "📊 Advanced Chart"])
 st.sidebar.divider()
 
-# --- PILIHAN KATEGORI SAHAM ---
-kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30 / Blue Chips)", "🚀 Lapis 2 (Mid-Small Caps)"])
+st.sidebar.markdown("**⚙️ Sumber Data Bandar**")
+data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Yahoo Finance (Gratis/Estimasi)", "🏦 GOAPI (Akurat/Limit Harian)"])
+use_goapi = "GOAPI" in data_source
 
-# Logika Penghematan Kuota GOAPI
-if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
-    st.sidebar.info("⚡ Mode Lapis 2 mematikan GOAPI untuk hemat limit. 100% Yahoo Finance.")
-    use_goapi = False
-    active_stock_list = SHARIA_MIDCAP_STOCKS
-    active_category_name = "Lapis 2 (Mid-Small Caps)"
+st.sidebar.divider()
+
+if mode == "🔍 Super Screener":
+    st.sidebar.markdown("**📂 Pilih Kolam Saham**")
+    kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
+    
+    if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
+        st.sidebar.info("⚡ Mode Lapis 2 mematikan GOAPI secara otomatis untuk menghemat limit. 100% menggunakan Yahoo Finance.")
+        use_goapi = False
+        active_stock_list = SHARIA_MIDCAP_STOCKS
+        active_category_name = "Lapis 2 (Mid-Small Caps)"
+    else:
+        active_stock_list = SHARIA_STOCKS
+        active_category_name = "Lapis 1 (JII30)"
 else:
-    data_source = st.sidebar.radio("Sumber Data Bandar:", ["🌐 Yahoo Finance (Estimasi)", "🏦 GOAPI (Akurat/Limit Harian)"])
-    use_goapi = "GOAPI" in data_source
     active_stock_list = SHARIA_STOCKS
-    active_category_name = "Lapis 1 (JII30)"
+    active_category_name = "Advanced Chart"
 
 st.sidebar.divider()
 
-# --- FITUR ADMIN ---
-current_user = st.session_state.get('username', '')
-if current_user in admin_list:
+# --- MENU KHUSUS ADMIN PANEL ---
+if is_admin:
     st.sidebar.markdown("👑 **Admin Panel**")
     if st.sidebar.button("🧹 Bersihkan Memori (Refresh Data)"):
         st.cache_data.clear()
-        st.sidebar.success("✅ Memori berhasil dihapus! Silakan cari saham lagi.")
+        api_registry.clear() # HAPUS JUGA BUKU TAMU SAAT ADMIN KLIK BERSIHKAN!
+        st.sidebar.success("✅ Memori berhasil dihapus!")
     st.sidebar.divider()
 
 st.sidebar.markdown(f"👤 Login sebagai: **{current_user}**")
