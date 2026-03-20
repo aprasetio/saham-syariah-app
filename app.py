@@ -22,14 +22,14 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# --- 3. BUKU TAMU GLOBAL (SHARED CACHE REGISTRY) ---
+# --- 3. BUKU TAMU GLOBAL ---
 @st.cache_resource
 def get_api_registry():
     return set()
 
 api_registry = get_api_registry()
 
-# --- 4. SISTEM LOGIN SAAS (SUPABASE AUTH) ---
+# --- 4. SISTEM LOGIN SAAS ---
 def login_ui():
     st.markdown("<h1 style='text-align: center;'>🔒 Portal Login Member</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -38,18 +38,13 @@ def login_ui():
         password = st.text_input("Password", type="password")
         if st.button("Login", use_container_width=True):
             try:
-                # Coba login via Supabase
                 res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                
-                # Ambil data profil (Role & Kuota)
                 profile = supabase.table('profiles').select('*').eq('id', res.user.id).execute()
-                
                 if profile.data:
                     st.session_state['user'] = profile.data[0]
                     st.session_state['logged_in'] = True
                     st.rerun()
-                else:
-                    st.error("Profil tidak ditemukan di database!")
+                else: st.error("Profil tidak ditemukan di database!")
             except Exception as e:
                 st.error("🚫 Email tidak terdaftar atau Password salah!")
 
@@ -57,67 +52,49 @@ if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
     login_ui()
     st.stop()
 
-# --- AMBIL DATA USER SAAT INI ---
 user_data = st.session_state['user']
 user_id = user_data['id']
 user_role = user_data['role'] 
 user_email = user_data['email']
 is_admin = (user_role == 'admin')
 
-# --- 5. LOGIKA PEMOTONGAN KUOTA API (BILLING SYSTEM) ---
+# --- 5. LOGIKA KUOTA API ---
 def check_and_deduct_quota(cache_key):
-    # 1. Jika data sudah ada di Cache Global, GRATIS!
-    if cache_key in api_registry:
-        return True
-        
-    # 2. Jika Admin, bebas tanpa batas
-    if is_admin:
-        return True
-        
-    # 3. Ambil data terbaru dari database
+    if cache_key in api_registry or is_admin: return True
     try:
         res = supabase.table('profiles').select('daily_quota, used_quota, last_reset_date').eq('id', user_id).execute()
         db_user = res.data[0]
-        
         today_str = datetime.utcnow().strftime('%Y-%m-%d')
         used_quota = db_user['used_quota']
         
-        # 4. Reset harian jika berganti hari
         if db_user['last_reset_date'] != today_str:
             used_quota = 0
             supabase.table('profiles').update({'used_quota': 0, 'last_reset_date': today_str}).eq('id', user_id).execute()
             
-        # 5. Cek apakah kuota masih cukup
         if used_quota < db_user['daily_quota']:
-            # Potong kuota!
             supabase.table('profiles').update({'used_quota': used_quota + 1}).eq('id', user_id).execute()
             return True
-        else:
-            return False
-    except Exception as e:
-        return False
+        else: return False
+    except Exception as e: return False
 
-# --- 6. CSS FIX & JUBAH GAIB (VERSI AMAN) ---
+# --- 6. CSS FIX ---
 st.markdown("""
 <style>
     .stAppDeployButton {display:none;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
-    [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; white-space: normal !important; }
-    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; white-space: normal !important; line-height: 1.2 !important; }
-    [data-testid="stMetricDelta"] div { font-size: 0.95rem !important; white-space: normal !important; }
+    [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; }
+    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- 7. DAFTAR SAHAM ---
 SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
 SHARIA_MIDCAP_STOCKS = ["BRMS", "ELSA", "ENRG", "PTRO", "SIDO", "MYOR", "ESSA", "CTRA", "BSDE", "SMRA", "PWON", "ARTO", "BTPS", "MIKA", "HEAL", "SILO", "MAPA", "AUTO", "SMSM", "TAPG", "DSNG", "LSIP", "AALI", "WIKA", "PTPP", "TOTL", "NRCA", "SCMA", "MNCN", "ERAA"]
-
 IDX_API_KEY = st.secrets.get("IDX_API_KEY", "")
 
-# --- 8. HELPER & FETCH FUNCTIONS ---
+# --- 8. HELPER FUNCTIONS ---
 def fix_dataframe(df):
     if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -141,8 +118,7 @@ def get_idx_target_date(df):
     latest_yf_date = df.index[-1].date()
     if latest_yf_date == wib_time.date() and wib_time.hour < 18:
         return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
-    else:
-        return df.index[-1].strftime('%Y-%m-%d')
+    return df.index[-1].strftime('%Y-%m-%d')
 
 @st.cache_data(ttl=3600)
 def get_ihsg_data():
@@ -150,37 +126,25 @@ def get_ihsg_data():
         ihsg = yf.download("^JKSE", period="1y", auto_adjust=True, progress=False)
         ihsg = fix_dataframe(ihsg)
         return ihsg[['Close']].rename(columns={'Close': 'IHSG_Close'})
-    except:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 @st.cache_data(ttl=43200)
 def fetch_idx_foreign_flow(symbol, target_date):
     headers = {'accept': 'application/json', 'X-API-KEY': IDX_API_KEY, 'User-Agent': 'Mozilla/5.0'}
     net_foreign, avg_buy_price = 0, 0
-    wib_time = datetime.utcnow() + timedelta(hours=7)
-    fetch_time = wib_time.strftime("%d %b %Y, %H:%M WIB")
-    
+    fetch_time = (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y, %H:%M WIB")
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
-        if res_broker.status_code != 200: return None, 0, None
-        
-        res_broker_json = res_broker.json()
-        total_buy_val, total_buy_lot, total_sell_val = 0, 0, 0
-        
-        if res_broker_json.get('status') == 'success':
-            for broker in res_broker_json['data']['results']:
-                if broker['side'] == 'BUY':
-                    total_buy_val += broker['value']
-                    total_buy_lot += broker['lot']
-                elif broker['side'] == 'SELL':
-                    total_sell_val += broker['value']
-                    
-            net_foreign = total_buy_val - total_sell_val
-            if total_buy_lot > 0:
-                avg_buy_price = total_buy_val / (total_buy_lot * 100)
-    except Exception as e: return None, 0, None
-        
+        if res_broker.status_code == 200:
+            res_broker_json = res_broker.json()
+            if res_broker_json.get('status') == 'success':
+                buy_val = sum(b['value'] for b in res_broker_json['data']['results'] if b['side'] == 'BUY')
+                buy_lot = sum(b['lot'] for b in res_broker_json['data']['results'] if b['side'] == 'BUY')
+                sell_val = sum(b['value'] for b in res_broker_json['data']['results'] if b['side'] == 'SELL')
+                net_foreign = buy_val - sell_val
+                if buy_lot > 0: avg_buy_price = buy_val / (buy_lot * 100)
+    except: pass
     return net_foreign, avg_buy_price, fetch_time
 
 @st.cache_data(ttl=3600) 
@@ -192,8 +156,7 @@ def get_fundamental_info(symbol):
 
 # --- 9. FUNGSI TEKNIKAL ---
 def check_candlestick_patterns(curr, prev):
-    score = 0
-    patterns = []
+    score = 0; patterns = []
     try:
         body = abs(curr['Close'] - curr['Open'])
         upper = curr['High'] - max(curr['Close'], curr['Open'])
@@ -214,16 +177,13 @@ def calculate_metrics(df, ihsg_df=None):
     df = fix_dataframe(df)
     try:
         df['Rsi'] = df.ta.rsi(length=14)
-        macd = df.ta.macd(fast=12, slow=26, signal=9)
-        bbands = df.ta.bbands(length=20, std=2)
-        
+        df = pd.concat([df, df.ta.macd(fast=12, slow=26, signal=9), df.ta.bbands(length=20, std=2)], axis=1)
         df['SMA20'] = df.ta.sma(length=20)
         df['SMA50'] = df.ta.sma(length=50)
         df['SMA100'] = df.ta.sma(length=100)
         df['EMA200'] = df.ta.ema(length=200)
         df['ATR'] = df.ta.atr(length=14)
         
-        df = pd.concat([df, macd, bbands], axis=1)
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low'])) * df['Volume']
         df['CMF'] = ad.fillna(0).rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
         
@@ -238,62 +198,38 @@ def calculate_metrics(df, ihsg_df=None):
 def advanced_analysis(df):
     if len(df) < 15: return "N/A", "-"
     curr = df.iloc[-1]
-    
     close, ma20, ma50, cmf = curr['Close'], curr['SMA20'], curr['SMA50'], curr['CMF']
-    phase = "Sideways/Noise"
-    if close > ma20 and ma20 > ma50: phase = "🔵 Markup"
-    elif close < ma20 and ma20 < ma50: phase = "🟠 Markdown"
-    elif close > ma50 and cmf < 0: phase = "🔴 Distribution"
-    elif close < ma50 and cmf > 0: phase = "🟢 Accumulation"
+    phase = "Sideways"
+    if close > ma50: phase = "🔵 Markup" if close > ma20 else "🔴 Distribution"
+    else: phase = "🟠 Markdown" if close < ma20 else "🟢 Accumulation"
 
     divergence = "-"
     if len(df) > 10:
-        price_trend = df['Close'].iloc[-1] - df['Close'].iloc[-10]
-        cmf_trend = df['CMF'].iloc[-1] - df['CMF'].iloc[-10]
-        if price_trend < 0 and cmf_trend > 0.15: divergence = "🟢 BULLISH DIV"
-        elif price_trend > 0 and cmf_trend < -0.15: divergence = "🔴 BEARISH DIV"
-            
+        if curr['Close'] - df['Close'].iloc[-10] < 0 and curr['CMF'] - df['CMF'].iloc[-10] > 0.15: divergence = "🟢 BULLISH DIV"
     return phase, divergence
 
 def score_analysis(df, fund_data):
     if df.empty or len(df)<2: return 0, 0, 0, 0, ["Data Kurang"], df.iloc[-1]
     curr, prev = df.iloc[-1], df.iloc[-2]
-    score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0
-    reasons = []
+    score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0; reasons = []
     
-    is_all_above_ma = False
     if not pd.isna(curr.get('SMA100')) and not pd.isna(curr.get('EMA200')):
-        if (curr['Close'] > curr['SMA20'] and curr['Close'] > curr['SMA50'] and 
-            curr['Close'] > curr['SMA100'] and curr['Close'] > curr['EMA200']):
-            is_all_above_ma = True
-            score_tech += 2  
-            reasons.append("🔥 MA")
-            
-    if not is_all_above_ma and not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
-        score_tech += 1
-        reasons.append("📈 Uptrend")
+        if curr['Close'] > curr['SMA20'] and curr['Close'] > curr['SMA50'] and curr['Close'] > curr['SMA100'] and curr['Close'] > curr['EMA200']:
+            score_tech += 2; reasons.append("🔥 MA")
+    elif not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
+        score_tech += 1; reasons.append("📈 Uptrend")
 
     if 'Stock_Ret_20' in df.columns and 'IHSG_Ret_20' in df.columns:
-        if not pd.isna(curr['Stock_Ret_20']) and not pd.isna(curr['IHSG_Ret_20']):
-            if curr['Stock_Ret_20'] > curr['IHSG_Ret_20']:
-                score_tech += 1.5 
-                reasons.append("🌟 IHSG")
+        if not pd.isna(curr['Stock_Ret_20']) and curr['Stock_Ret_20'] > curr['IHSG_Ret_20']:
+            score_tech += 1.5; reasons.append("🌟 IHSG")
         
     cmf = curr.get('CMF', 0)
     if cmf > 0.1: score_bandar = 2; reasons.append("🐳 CMF")
-    elif cmf > 0.05: score_bandar = 1
-    elif cmf < -0.1: score_bandar = -2
-        
-    if curr.get('MACD_12_26_9', 0) > curr.get('MACDs_12_26_9', 0): score_tech += 1
-    rsi = curr.get('Rsi', 50)
-    if rsi < 35: score_tech += 2; reasons.append("💎 RSI")
-    elif rsi > 70: score_tech -= 1
     
-    if fund_data:
-        if fund_data.get('PBV') and fund_data.get('PBV') < 1.5: score_fund += 2
-        if fund_data.get('EPS_Growth') and fund_data.get('EPS_Growth') > 0.10: 
-            score_fund += 2
-            reasons.append("🚀 EPS")
+    if curr.get('Rsi', 50) < 35: score_tech += 2; reasons.append("💎 RSI")
+    
+    if fund_data and fund_data.get('EPS_Growth') and fund_data.get('EPS_Growth') > 0.10: 
+        score_fund += 2; reasons.append("🚀 EPS")
         
     s_candle, patterns = check_candlestick_patterns(curr, prev)
     score_candle += s_candle
@@ -305,146 +241,135 @@ def score_analysis(df, fund_data):
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     
-    # --- KAMUS & LEGENDS ---
     with st.expander("📖 Kamus Indikator & Panduan Power Asing (Klik untuk membuka)"):
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("""
-            **⚡ Panduan Power Asing (% Dominasi):**
-            * **< 5%** : Lemah (Asing tidak terlalu peduli)
-            * **5% - 15%** : Sedang (Ada ketertarikan Asing)
-            * **15% - 30%** : Kuat (Asing mulai menyetir harga)
-            * **> 30%** : Sangat Kuat / Dominan (Saham dikendalikan Asing)
-            
-            **📊 Status Vs IHSG:**
-            * ✅ **Outperform**: Saham lebih kuat/naik lebih cepat daripada IHSG.
-            * ❌ **Underperform**: Saham lebih lemah/ketinggalan dari IHSG.
+            **⚡ Panduan Power Asing:**
+            * **< 5%** : Lemah (Asing kurang peduli)
+            * **5% - 15%** : Sedang (Ada akumulasi wajar)
+            * **15% - 30%** : Kuat (Asing menyetir harga)
+            * **> 30%** : Sangat Kuat / Dominan
             """)
         with c2:
             st.markdown("""
             **🔖 Arti Simbol Katalis:**
-            * 🔥 **MA** : Harga di atas semua garis Moving Average (Uptrend).
-            * 🌟 **IHSG** : Mengalahkan performa IHSG.
-            * 🐳 **CMF** : Ada indikasi Akumulasi Bandar.
-            * 💎 **RSI** : Harga sudah murah (Oversold), potensi mantul.
-            * 🚀 **EPS** : Pertumbuhan laba bersih perusahaan bagus.
-            * 🕯️ **Pola** : Pola candle pembalikan arah (Hammer/Engulfing).
+            * 🔥 **MA** : Uptrend (Di atas semua MA)
+            * 🌟 **IHSG** : Outperform IHSG
+            * 🐳 **CMF** : Akumulasi Bandar Besar
+            * 💎 **RSI** : Harga Oversold (Murah)
+            * 🚀 **EPS** : Laba Perusahaan Tumbuh
+            * 🕯️ **Pola** : Pola Reversal (Hammer, dll)
             """)
 
     if st.button("MULAI SCANNING"):
-        progress = st.progress(0)
-        status = st.empty()
-        results = []
-        tickers = [f"{s}.JK" for s in stock_list]
         
-        status.text("Mengambil Data IHSG (Benchmark)...")
-        ihsg_df = get_ihsg_data()
-        price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
-        
-        last_sync_time, last_bursa_date, idx_date_used = None, None, None
-        
-        for i, t in enumerate(tickers):
-            status.text(f"Menganalisa Saham: {t} ...")
-            progress.progress((i+1)/len(tickers))
-            
-            try:
-                df = price_data[t].copy()
-                df = fix_dataframe(df)
-                if df.empty or len(df) < 50: continue
-                if df['Volume'].iloc[-1] < (5000000 if category_name == "Lapis 1 (JII30)" else 2000000): continue
-                
-                df = calculate_metrics(df, ihsg_df)
-                fund = get_fundamental_info(t)
-                s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
-                wyckoff_phase, divergence = advanced_analysis(df)
-                total_score = s_tech + s_fund + s_bandar + s_candle
-                
-                atr = last.get('ATR', 0)
-                close, volume = last['Close'], last['Volume']
-                daily_turnover = close * volume 
-                
-                stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
-                target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
-                
-                rec = "WAIT"
-                if total_score >= 6 or "BULLISH DIV" in divergence or "ALL ABOVE MA" in " ".join(reasons): rec = "💎 STRONG BUY"
-                elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
-                
-                if total_score < 3 and "BULLISH DIV" not in divergence and "Accumulation" not in wyckoff_phase and "ALL ABOVE MA" not in " ".join(reasons):
-                    continue
-                
-                symbol_only = t.replace(".JK", "")
-                net_foreign, avg_buy_price, power_pct = None, 0, 0
-                idx_date = get_idx_target_date(df)
-                idx_date_used = idx_date
-                last_bursa_date = df.index[-1].strftime('%d %b %Y') 
-                
-                cache_key = f"{symbol_only}_{idx_date}"
-                
-                if use_idx_data:
-                    # CEK & POTONG KUOTA API
-                    if check_and_deduct_quota(cache_key):
-                        status.text(f"Menarik Data IDX: {t} ...")
-                        time.sleep(1) 
-                        net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(symbol_only, idx_date)
-                        if fetch_time: 
-                            last_sync_time = fetch_time 
-                            api_registry.add(cache_key) # Simpan ke cache agar user lain gratis!
+        # ==========================================================
+        # JALUR 1: JII30 (BACA INSTAN DARI SUPABASE SERVER - 0 API HIT)
+        # ==========================================================
+        if category_name == "Lapis 1 (JII30)":
+            with st.spinner("⚡ Menyedot data matang dari Server..."):
+                res = supabase.table('jii30_daily_data').select('*').execute()
+                if res.data:
+                    df_res = pd.DataFrame(res.data)
+                    
+                    # Sensor Data Asing Jika User Gratisan
+                    if user_role == 'free':
+                        df_res['power_asing'] = None
+                        df_res['modal_asing'] = None
+                        
+                    # Merapikan Urutan Kolom
+                    df_res = df_res[['kode', 'harga', 'tp', 'sl', 'fase', 'power_asing', 'modal_asing', 'status', 'katalis']]
+                    df_res.columns = ['Kode', 'Harga', 'TP', 'SL', 'Fase', 'Power Asing', 'Modal Asing', 'Status', 'Katalis']
+                    
+                    st.success(f"✅ Selesai! (Loading Instan | 0 Kuota API) - Ditemukan {len(df_res)} Saham.")
+                    st.caption(f"📅 **Terakhir Diupdate oleh Server Robot:** {res.data[0]['fetch_date'] if 'fetch_date' in res.data[0] else 'Hari Ini'}")
+                    
+                    # Konfigurasi Tampilan Kolom
+                    col_config = {
+                        "Kode": st.column_config.TextColumn(width="small"),
+                        "Harga": st.column_config.NumberColumn(format="Rp %d"),
+                        "TP": st.column_config.NumberColumn(format="Rp %d"),
+                        "SL": st.column_config.NumberColumn(format="Rp %d"),
+                        "Katalis": st.column_config.TextColumn(width="medium")
+                    }
+                    
+                    # Efek Sensor di Tabel
+                    if user_role == 'free':
+                        col_config["Power Asing"] = st.column_config.TextColumn(default="🔒 VIP")
+                        col_config["Modal Asing"] = st.column_config.TextColumn(default="🔒 VIP")
                     else:
-                        st.sidebar.error("❌ Limit Kuota Harian Habis!")
-                        use_idx_data = False # Paksa matikan jika limit habis
-                
-                if net_foreign is not None and net_foreign <= 0: continue
-                
-                if net_foreign is not None:
-                    if daily_turnover > 0: power_pct = (abs(net_foreign) / daily_turnover) * 100
+                        col_config["Power Asing"] = st.column_config.NumberColumn(format="%.1f %%")
+                        col_config["Modal Asing"] = st.column_config.NumberColumn(format="Rp %d")
 
-                results.append({
-                    "Kode": symbol_only,
-                    "Harga": int(close),
-                    "TP": int(target_profit),
-                    "SL": int(stop_loss),
-                    "Fase": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
-                    "Power Asing": float(power_pct) if net_foreign is not None else 0.0,
-                    "Modal Asing": int(avg_buy_price) if avg_buy_price > 0 else 0,
-                    "Status": rec,
-                    "Katalis": ", ".join(reasons) if reasons else "-"
-                })
-            except Exception as loop_e: continue
-            
-        progress.empty()
-        status.empty()
-        
-        if results:
-            df_res = pd.DataFrame(results)
-            st.success(f"Selesai! {len(results)} Saham Ditemukan.")
-            
-            waktu_info = f"📅 **Data Harga Per:** {last_bursa_date}"
-            if use_idx_data:
-                sync_time_disp = last_sync_time if last_sync_time else (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y, %H:%M WIB")
-                waktu_info += f" | 🔄 **Data Asing Diambil Tgl:** {idx_date_used} (Sync: {sync_time_disp})"
-            else:
-                waktu_info += " | 🌐 **Sumber Bandar:** Yahoo Finance"
-            
-            st.caption(waktu_info)
-            
-            # --- DATAFRAME NATIVE STREAMLIT (BISA SORT & PIN) ---
-            st.dataframe(
-                df_res, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "Kode": st.column_config.TextColumn(width="small"),
-                    "Harga": st.column_config.NumberColumn(format="Rp %d"),
-                    "TP": st.column_config.NumberColumn(format="Rp %d"),
-                    "SL": st.column_config.NumberColumn(format="Rp %d"),
-                    "Power Asing": st.column_config.NumberColumn(format="%.1f %%"),
-                    "Modal Asing": st.column_config.NumberColumn(format="Rp %d"),
-                    "Katalis": st.column_config.TextColumn(width="medium")
-                }
-            )
+                    st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
+                else:
+                    st.warning("Data server masih kosong hari ini.")
+
+        # ==========================================================
+        # JALUR 2: LAPIS 2 (SCANNING LIVE VIA YFINANCE - TANPA GOAPI)
+        # ==========================================================
         else:
-            st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
+            progress = st.progress(0)
+            status = st.empty()
+            results = []
+            tickers = [f"{s}.JK" for s in stock_list]
+            
+            status.text("Mengambil Data IHSG...")
+            ihsg_df = get_ihsg_data()
+            price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
+            
+            for i, t in enumerate(tickers):
+                status.text(f"Menganalisa: {t} ...")
+                progress.progress((i+1)/len(tickers))
+                try:
+                    df = price_data[t].copy()
+                    df = fix_dataframe(df)
+                    df = df[df['Volume'] > 0] # Anti Ghost Row
+                    if df.empty or len(df) < 50 or df['Volume'].iloc[-1] < 2000000: continue
+                    
+                    df = calculate_metrics(df, ihsg_df)
+                    fund = get_fundamental_info(t)
+                    s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
+                    wyckoff_phase, divergence = advanced_analysis(df)
+                    total_score = s_tech + s_fund + s_bandar + s_candle
+                    
+                    atr, close = last.get('ATR', 0), last['Close']
+                    stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
+                    target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
+                    
+                    rec = "WAIT"
+                    if total_score >= 6 or "BULLISH DIV" in divergence or "🔥 MA" in reasons: rec = "💎 STRONG BUY"
+                    elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
+                    
+                    if total_score < 3 and "Accumulation" not in wyckoff_phase: continue
+                    
+                    results.append({
+                        "Kode": t.replace(".JK", ""), "Harga": int(close), "TP": int(target_profit), "SL": int(stop_loss),
+                        "Fase": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
+                        "Power Asing": 0.0, "Modal Asing": 0, "Status": rec, "Katalis": ", ".join(reasons) if reasons else "-"
+                    })
+                except Exception as e: continue
+                
+            progress.empty(); status.empty()
+            
+            if results:
+                df_res = pd.DataFrame(results)
+                st.success(f"Selesai! {len(results)} Saham Lapis 2 Ditemukan.")
+                st.caption("🌐 **Sumber:** Yahoo Finance (Data Asing Dinonaktifkan untuk Lapis 2)")
+                
+                st.dataframe(df_res, use_container_width=True, hide_index=True,
+                    column_config={
+                        "Kode": st.column_config.TextColumn(width="small"),
+                        "Harga": st.column_config.NumberColumn(format="Rp %d"),
+                        "TP": st.column_config.NumberColumn(format="Rp %d"),
+                        "SL": st.column_config.NumberColumn(format="Rp %d"),
+                        "Power Asing": st.column_config.TextColumn(default="Tidak Tersedia"),
+                        "Modal Asing": st.column_config.TextColumn(default="Tidak Tersedia"),
+                        "Katalis": st.column_config.TextColumn(width="medium")
+                    }
+                )
+            else: st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
 
 # --- 11. FITUR CHART DETAIL ---
 def show_chart(use_idx_data):
@@ -466,6 +391,8 @@ def show_chart(use_idx_data):
             st.error("Saham tidak ditemukan!")
             return
 
+        df = fix_dataframe(df)
+        df = df[df['Volume'] > 0]
         df = calculate_metrics(df, ihsg_df)
         fund = get_fundamental_info(symbol)
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
@@ -499,7 +426,7 @@ def show_chart(use_idx_data):
         else:
             c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Yahoo Finance Mode / Kuota Habis", delta_color="off")
         
-        is_outperform = "🌟 Outperform IHSG" in " ".join(reasons)
+        is_outperform = "🌟 IHSG" in " ".join(reasons)
         eps_g = fund.get('EPS_Growth') if fund else None
         c4.metric("Status vs Pasar (RRG)", "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM", f"Laba: +{eps_g*100:.1f}%" if eps_g and eps_g > 0 else "Laba: N/A", delta_color="normal" if is_outperform else "off")
         
@@ -532,7 +459,7 @@ st.sidebar.caption(f"Status Akun: **{user_role.upper()}**")
 # Cek Sisa Kuota Realtime dari DB
 try:
     current_db = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).execute().data[0]
-    st.sidebar.caption(f"Sisa Kuota API: **{current_db['daily_quota'] - current_db['used_quota']} / {current_db['daily_quota']}**")
+    st.sidebar.caption(f"Sisa Kuota API Personal: **{current_db['daily_quota'] - current_db['used_quota']} / {current_db['daily_quota']}**")
 except: pass
 
 st.sidebar.divider()
