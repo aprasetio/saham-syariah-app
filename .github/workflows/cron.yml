@@ -6,7 +6,7 @@ on:
     - cron: '0 12 * * 1-5'
   workflow_dispatch:
 
-# Menyembunyikan peringatan (warning) Node.js dari GitHub
+# Menyembunyikan peringatan Node.js
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -20,10 +20,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10' # <--- KITA TURUNKAN KE VERSI PALING STABIL
 
       - name: Install Dependencies
-        # Mengunci Pandas dan Numpy di versi stabil agar pandas-ta bisa ter-install
         run: |
           pip install "numpy<2.0.0" "pandas<3.0.0" yfinance pandas-ta requests supabase
 
