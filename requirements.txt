@@ -1,7 +1,8 @@
 streamlit
-yfinance
 pandas
-pandas_ta
+pandas-ta
 plotly
-matplotlib
+requests
 supabase==2.3.4
+websockets>=13.0
+yfinance>=0.2.40
