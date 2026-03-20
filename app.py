@@ -241,25 +241,32 @@ def score_analysis(df, fund_data):
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     
-    with st.expander("📖 Kamus Indikator & Panduan Power Asing (Klik untuk membuka)"):
+    # --- KAMUS & LEGENDS SCREENER ---
+    with st.expander("📖 Panduan Membaca Hasil Screener (Klik untuk membuka)"):
+        st.info("💡 **Tips:** Kombinasi Katalis yang banyak (contoh: 🔥🌟🐳) menandakan probabilitas kenaikan harga yang lebih tinggi.")
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("""
-            **⚡ Panduan Power Asing:**
-            * **< 5%** : Lemah (Asing kurang peduli)
-            * **5% - 15%** : Sedang (Ada akumulasi wajar)
-            * **15% - 30%** : Kuat (Asing menyetir harga)
-            * **> 30%** : Sangat Kuat / Dominan
+            **⚡ Membaca Power Asing (% Dominasi):**
+            Angka ini menunjukkan seberapa besar pengaruh Uang Asing terhadap pergerakan saham hari ini.
+            * **< 5% (Lemah)** : Asing tidak terlalu peduli. Harga digerakkan oleh ritel/bandar lokal.
+            * **5% - 15% (Sedang)** : Mulai ada ketertarikan Asing (Akumulasi wajar).
+            * **15% - 30% (Kuat)** : Asing bertindak sebagai *Market Maker* (Menyetir harga).
+            * **> 30% (Sangat Kuat)** : Saham sedang dikendalikan penuh/diborong brutal oleh Asing.
+            
+            **📊 Status Rekomendasi:**
+            * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna (Uptrend kuat + Akumulasi).
+            * ✅ **BUY** : Saham mulai menunjukkan tanda kebangkitan / pantulan.
             """)
         with c2:
             st.markdown("""
-            **🔖 Arti Simbol Katalis:**
-            * 🔥 **MA** : Uptrend (Di atas semua MA)
-            * 🌟 **IHSG** : Outperform IHSG
-            * 🐳 **CMF** : Akumulasi Bandar Besar
-            * 💎 **RSI** : Harga Oversold (Murah)
-            * 🚀 **EPS** : Laba Perusahaan Tumbuh
-            * 🕯️ **Pola** : Pola Reversal (Hammer, dll)
+            **🔖 Arti Simbol Katalis (Pemicu Kenaikan):**
+            * 🔥 **MA (Moving Average)** : Harga sedang Uptrend (berada di atas garis rata-rata). Tren sedang memihak Anda.
+            * 🌟 **IHSG (Outperform)** : Saham ini berlari lebih kencang daripada IHSG. Jika IHSG merah, saham ini punya potensi tetap hijau.
+            * 🐳 **CMF (Chaikin Money Flow)** : Radar mendeteksi adanya suntikan dana besar (Bandar/Institusi sedang menampung barang).
+            * 💎 **RSI (Oversold)** : Harga saham sudah jatuh terlalu dalam (Diskon/Murah) dan bersiap memantul naik (*Rebound*).
+            * 🚀 **EPS (Earning Per Share)** : Fundamental Kuat! Laba bersih perusahaan bertumbuh di atas 10%.
+            * 🕯️ **Pola (Candlestick)** : Muncul pola pantulan di grafik (seperti *Hammer* atau *Engulfing*).
             """)
 
     if st.button("MULAI SCANNING"):
@@ -385,6 +392,18 @@ def show_chart(use_idx_data):
             st.markdown("<br>", unsafe_allow_html=True)
             submit_search = st.form_submit_button("Cari Saham 🔍")
             
+    # --- KAMUS CHART WYCKOFF ---
+    with st.expander("📖 Panduan Membaca Fase Wyckoff & Target Harga"):
+        st.markdown("""
+        **Siklus Pergerakan Harga Bandar (Wyckoff Phase):**
+        1. 🟢 **Accumulation (Akumulasi):** Harga sedang di bawah dan bergerak mendatar. Bandar sedang diam-diam mengumpulkan/membeli saham dari ritel yang panik. *(Fase terbaik untuk cicil beli)*.
+        2. 🔵 **Markup (Fase Naik):** Bandar mulai mengerek harga naik dengan cepat. Terjadi *Uptrend* yang kuat. *(Fase nikmat untuk Hold/Tahan untung)*.
+        3. 🔴 **Distribution (Distribusi):** Harga tertahan di pucuk atas. Bandar mulai diam-diam menjual/membuang barangnya ke ritel yang FOMO (takut ketinggalan). *(Waspada, siap-siap Take Profit)*.
+        4. 🟠 **Markdown (Fase Turun):** Bandar sudah keluar, harga dibiarkan jatuh bebas (*Downtrend*). *(Hindari saham di fase ini)*.
+
+        **Penentuan Target:** Target Profit (TP) dan Stop Loss (SL) dihitung secara dinamis menggunakan indikator volatilitas (ATR). Artinya, jarak TP/SL akan melebar jika pergerakan saham sedang liar, dan menyempit jika saham sedang sepi.
+        """)
+        
     if submit_search and ticker:
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
         ticker_only = ticker.replace(".JK", "")
@@ -504,6 +523,16 @@ if st.sidebar.button("Keluar (Logout)"):
     st.session_state['user'] = None
     supabase.auth.sign_out()
     st.rerun()
+
+# --- DISCLAIMER RISIKO (WAJIB FINTECH) ---
+st.sidebar.divider()
+st.sidebar.markdown("""
+<div style="font-size: 0.8rem; color: #666; text-align: justify;">
+<b>⚠️ DISCLAIMER & PERINGATAN RISIKO</b><br>
+Semua data, analisis, dan rekomendasi yang ditampilkan di aplikasi ini murni untuk tujuan informasi dan edukasi, <b>BUKAN</b> merupakan nasihat keuangan resmi atau ajakan pasti untuk membeli/menjual saham.<br><br>
+Perdagangan saham memiliki risiko kerugian finansial yang tinggi. Segala keputusan transaksi dan risiko kerugian sepenuhnya merupakan <b>tanggung jawab pribadi pengguna</b>. Pembuat aplikasi dibebaskan dari segala tuntutan hukum atas kerugian materiil maupun imateriil.
+</div>
+""", unsafe_allow_html=True)
 
 # --- MENJALANKAN APLIKASI ---
 if mode == "🔍 Super Screener": run_screener(use_idx_data, active_stock_list, active_category_name)
