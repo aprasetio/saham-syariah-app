@@ -48,7 +48,6 @@ if not check_password():
     st.stop()
 
 # --- 3. AMBIL DATA RAHASIA & STATUS ADMIN ---
-# Tetap membaca "GOAPI_KEY" dari secrets.toml lama Anda agar tidak error
 IDX_API_KEY = st.secrets.get("IDX_API_KEY", st.secrets.get("GOAPI_KEY", ""))
 admin_list = st.secrets.get("ADMIN_USERS", ADMIN_USERS)
 
@@ -62,13 +61,18 @@ def get_api_registry():
 
 api_registry = get_api_registry()
 
-# --- 5. CSS FIX & JUBAH GAIB STREAMLIT ---
+# --- 5. CSS FIX & JUBAH GAIB (SUDAH DIPERBAIKI) ---
 st.markdown("""
 <style>
-    /* Menyembunyikan Menu Streamlit dan Footer (Jubah Gaib) */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
+    /* Menyembunyikan Menu Streamlit kanan atas (GitHub, Settings) */
+    #MainMenu {visibility: hidden !important;}
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    
+    /* Menyembunyikan tulisan "Made with Streamlit" di Footer */
+    footer {visibility: hidden !important;}
+    
+    /* Membuat background header transparan, TAPI tombol Sidebar Kiri Atas tetap bisa diklik */
+    header {background: transparent !important;}
 
     /* Styling Visual Metric */
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
@@ -382,8 +386,6 @@ def run_screener(use_idx_data, stock_list, category_name):
 
                 status_ihsg = "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform"
 
-                # PERBAIKAN UI/UX TABEL: 
-                # Menggunakan \n (Baris Baru) agar tulisan turun ke bawah dan tidak memanjang ke samping
                 formatted_reasons = "\n".join([f"• {r.strip()}" for r in reasons])
 
                 results.append({
@@ -410,7 +412,6 @@ def run_screener(use_idx_data, stock_list, category_name):
             elif last_bursa_date:
                 st.caption(f"📅 **Data Bursa Per:** {last_bursa_date} | 🌐 **Sumber Bandar:** Yahoo Finance")
             
-            # Konfigurasi Dataframe agar mendukung multilines (Baris Baru) secara sempurna di Streamlit
             st.dataframe(df_res, use_container_width=True, hide_index=True)
         else:
             st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
@@ -452,7 +453,7 @@ def show_chart(use_idx_data):
         if use_idx_data and not is_admin:
             if cache_key not in api_registry:
                 st.info(f"ℹ️ **Info:** Saham {ticker_only} belum terdapat di dalam data Smart Screener hari ini. Aplikasi otomatis menggunakan data Yahoo Finance.")
-                use_idx_data = False # Paksa matikan API agar tidak memakan limit baru
+                use_idx_data = False
         
         if use_idx_data:
             net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(ticker_only, idx_date)
@@ -548,7 +549,7 @@ if mode == "🔍 Super Screener":
     kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
     
     if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
-        st.sidebar.info("⚡ Mode Lapis 2 menggunakan 100% Yahoo Finance secara otomatis.")
+        st.sidebar.info("⚡ Mode Lapis 2 mematikan koneksi API secara otomatis untuk menghemat limit. 100% menggunakan Yahoo Finance.")
         use_idx_data = False
         active_stock_list = SHARIA_MIDCAP_STOCKS
         active_category_name = "Lapis 2 (Mid-Small Caps)"
