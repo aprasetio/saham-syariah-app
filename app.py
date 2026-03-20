@@ -97,7 +97,7 @@ def login_ui():
                         st.session_state['user'] = profile.data[0]
                         st.session_state['logged_in'] = True
                         
-                        # Merekam Audit Log (Dilengkapi pelaporan Error)
+                        # Merekam Audit Log 
                         try:
                             supabase.table('audit_logs').insert({
                                 "user_email": email,
@@ -106,7 +106,7 @@ def login_ui():
                             }).execute()
                         except Exception as e: 
                             st.warning(f"Sistem gagal merekam log ke database: {e}") 
-                            time.sleep(2) # Beri waktu 2 detik agar pesan error terbaca sebelum masuk
+                            time.sleep(2) 
                             
                         st.rerun()
                     else: st.error("Profil tidak ditemukan di database!")
@@ -123,23 +123,26 @@ user_role = user_data['role']
 user_email = user_data['email']
 is_admin = (user_role == 'admin')
 
-# --- 5. LOGIKA KUOTA API ---
+# --- 5. AUTO-RESET & LOGIKA KUOTA API ---
+# 5A. Eksekusi Instan: Reset otomatis jika hari berganti (Zona Waktu WIB)
+try:
+    wib_today = (datetime.utcnow() + timedelta(hours=7)).strftime('%Y-%m-%d')
+    user_profile = supabase.table('profiles').select('daily_quota, used_quota, last_reset_date').eq('id', user_id).execute().data[0]
+    
+    if user_profile.get('last_reset_date') != wib_today:
+        supabase.table('profiles').update({'used_quota': 0, 'last_reset_date': wib_today}).eq('id', user_id).execute()
+except Exception as e: 
+    pass
+
+# 5B. Pemotongan Kuota saat Cari Saham
 def check_and_deduct_quota(cache_key):
     if cache_key in api_registry or is_admin: return True
     try:
-        res = supabase.table('profiles').select('daily_quota, used_quota, last_reset_date').eq('id', user_id).execute()
-        db_user = res.data[0]
-        today_str = datetime.utcnow().strftime('%Y-%m-%d')
-        used_quota = db_user['used_quota']
-        
-        if db_user.get('last_reset_date') != today_str:
-            used_quota = 0
-            supabase.table('profiles').update({'used_quota': 0, 'last_reset_date': today_str}).eq('id', user_id).execute()
-            
-        if used_quota < db_user['daily_quota']:
-            supabase.table('profiles').update({'used_quota': used_quota + 1}).eq('id', user_id).execute()
+        fresh_db = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).execute().data[0]
+        if fresh_db['used_quota'] < fresh_db['daily_quota']:
+            supabase.table('profiles').update({'used_quota': fresh_db['used_quota'] + 1}).eq('id', user_id).execute()
             return True
-        else: return False
+        return False
     except Exception as e: return False
 
 # --- 6. CSS FIX ---
@@ -470,7 +473,7 @@ def show_chart(use_idx_data):
                 "details": f"Mencari analisis detail saham: {ticker_only}"
             }).execute()
         except Exception as e: 
-            st.warning(f"Sistem gagal merekam log analitik: {e}") # Logika error handling baru
+            st.warning(f"Sistem gagal merekam log analitik: {e}") 
         
         ihsg_df = get_ihsg_data()
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
