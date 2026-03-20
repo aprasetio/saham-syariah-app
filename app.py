@@ -97,15 +97,17 @@ def login_ui():
                         st.session_state['user'] = profile.data[0]
                         st.session_state['logged_in'] = True
                         
-                        # Merekam Audit Log (Login & Persetujuan ToS)
+                        # Merekam Audit Log (Dilengkapi pelaporan Error)
                         try:
                             supabase.table('audit_logs').insert({
                                 "user_email": email,
                                 "action": "LOGIN_TOS_ACCEPTED",
                                 "details": "User sukses login dan menyetujui Syarat & Ketentuan serta Disclaimer."
                             }).execute()
-                        except: pass # Abaikan jika gagal merekam log, jangan hentikan login
-                        
+                        except Exception as e: 
+                            st.warning(f"Sistem gagal merekam log ke database: {e}") 
+                            time.sleep(2) # Beri waktu 2 detik agar pesan error terbaca sebelum masuk
+                            
                         st.rerun()
                     else: st.error("Profil tidak ditemukan di database!")
                 except Exception as e:
@@ -130,7 +132,7 @@ def check_and_deduct_quota(cache_key):
         today_str = datetime.utcnow().strftime('%Y-%m-%d')
         used_quota = db_user['used_quota']
         
-        if db_user['last_reset_date'] != today_str:
+        if db_user.get('last_reset_date') != today_str:
             used_quota = 0
             supabase.table('profiles').update({'used_quota': 0, 'last_reset_date': today_str}).eq('id', user_id).execute()
             
@@ -467,7 +469,8 @@ def show_chart(use_idx_data):
                 "action": "SEARCH_CHART",
                 "details": f"Mencari analisis detail saham: {ticker_only}"
             }).execute()
-        except: pass 
+        except Exception as e: 
+            st.warning(f"Sistem gagal merekam log analitik: {e}") # Logika error handling baru
         
         ihsg_df = get_ihsg_data()
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
