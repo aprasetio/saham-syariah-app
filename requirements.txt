@@ -4,3 +4,4 @@ pandas
 pandas_ta
 plotly
 matplotlib
+supabase==2.3.4
