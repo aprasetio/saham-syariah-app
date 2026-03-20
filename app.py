@@ -29,24 +29,80 @@ def get_api_registry():
 
 api_registry = get_api_registry()
 
-# --- 4. SISTEM LOGIN SAAS ---
+# --- 4. SISTEM LOGIN SAAS DENGAN TOS & DISCLAIMER ---
 def login_ui():
     st.markdown("<h1 style='text-align: center;'>🔒 Portal Login Member</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
+        
+        # Kotak Scroll untuk Syarat & Ketentuan
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("📜 **Persetujuan Layanan (Wajib Dibaca)**")
+        with st.container(height=200):
+            st.markdown("""
+            **SYARAT DAN KETENTUAN LAYANAN (TERMS OF SERVICE)**
+            
+            Selamat datang di platform kami. Dengan mengakses atau menggunakan layanan kami, Anda dianggap telah membaca, memahami, dan menyetujui untuk terikat oleh Syarat dan Ketentuan berikut:
+            
+            **1. Deskripsi Layanan**
+            Platform ini menyediakan layanan analisis data pasar modal dan instrumen keuangan lainnya. Kami menawarkan dua jenis akses layanan:
+            * **Layanan Gratis:** Memberikan akses terbatas pada ringkasan analisis umum dan data dengan waktu pembaruan yang tertunda (delayed).
+            * **Layanan Berbayar (Premium):** Memberikan akses ke fitur analisis mendalam, visualisasi data yang lebih komprehensif, dan frekuensi pembaruan data yang lebih tinggi sesuai paket langganan yang dipilih.
+            
+            **2. Pembatasan Penggunaan**
+            * Layanan ini hanya ditujukan untuk penggunaan pribadi dan non-komersial.
+            * Pengguna dilarang keras melakukan penggandaan, pendistribusian ulang, penjualan kembali, atau eksploitasi data mentah maupun hasil analisis dari platform ini ke pihak ketiga tanpa izin tertulis dari kami.
+            * Penggunaan skrip otomatis, bot, scraping, atau teknologi serupa untuk mengambil data dari platform ini dilarang dan dapat berakibat pada pemblokiran akun secara permanen.
+            
+            **3. Akun dan Keamanan**
+            Pengguna bertanggung jawab penuh atas kerahasiaan informasi akun dan kata sandi mereka. Segala aktivitas yang terjadi di bawah akun pengguna adalah tanggung jawab penuh pemilik akun.
+            
+            **4. Kebijakan Langganan dan Pembatalan**
+            * Biaya langganan untuk Layanan Berbayar bersifat final dan tidak dapat dikembalikan (non-refundable), kecuali dinyatakan lain secara tertulis oleh kami.
+            * Kami berhak mengubah biaya langganan atau fitur dalam paket layanan dengan pemberitahuan sebelumnya melalui platform atau email resmi.
+            
+            **5. Perubahan Ketentuan**
+            Kami berhak untuk mengubah atau memperbarui Syarat dan Ketentuan ini sewaktu-waktu. Perubahan akan berlaku segera setelah dipublikasikan di platform ini.
+            
+            ---
+            **SANGGAHAN PENTING (DISCLAIMER)**
+            
+            Penting untuk dipahami bahwa seluruh informasi yang disajikan dalam platform ini adalah untuk tujuan edukasi dan referensi semata.
+            
+            **1. Bukan Nasihat Investasi**
+            Kami bukan penasihat investasi berlisensi. Seluruh konten, hasil analisis, dan sinyal yang ditampilkan BUKAN merupakan perintah atau ajakan untuk membeli, menjual, atau menahan instrumen keuangan apa pun. Keputusan investasi sepenuhnya berada di tangan Anda.
+            
+            **2. Risiko Pasar**
+            Investasi di pasar modal memiliki risiko tinggi, termasuk risiko kehilangan seluruh modal. Kinerja masa lalu tidak menjamin hasil di masa depan. Kami sangat menyarankan Anda untuk melakukan analisis mandiri (Do Your Own Research) atau berkonsultasi dengan penasihat keuangan profesional sebelum mengambil keputusan finansial.
+            
+            **3. Integritas Data**
+            Data yang disajikan diperoleh dari penyedia data pihak ketiga yang dianggap tepercaya. Namun, kami tidak menjamin akurasi, kelengkapan, atau ketepatan waktu data tersebut. Kami tidak bertanggung jawab atas kerugian finansial, langsung maupun tidak langsung, yang timbul akibat kesalahan teknis, keterlambatan data, atau ketidakakuratan informasi dalam platform ini.
+            
+            **4. Batasan Tanggung Jawab**
+            Dengan menggunakan layanan ini, Anda setuju untuk membebaskan kami dari segala tuntutan hukum atau kerugian yang timbul akibat keputusan yang Anda ambil berdasarkan informasi yang diperoleh dari platform ini.
+            """)
+        
+        # Checkbox Wajib
+        agree_tos = st.checkbox("✅ Saya telah membaca, memahami, dan menyetujui Syarat & Ketentuan serta Disclaimer di atas.")
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Logika Tombol Login
         if st.button("Login", use_container_width=True):
-            try:
-                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                profile = supabase.table('profiles').select('*').eq('id', res.user.id).execute()
-                if profile.data:
-                    st.session_state['user'] = profile.data[0]
-                    st.session_state['logged_in'] = True
-                    st.rerun()
-                else: st.error("Profil tidak ditemukan di database!")
-            except Exception as e:
-                st.error("🚫 Email tidak terdaftar atau Password salah!")
+            if not agree_tos:
+                st.error("⚠️ Anda wajib mencentang persetujuan Syarat & Ketentuan sebelum dapat melakukan Login.")
+            else:
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    profile = supabase.table('profiles').select('*').eq('id', res.user.id).execute()
+                    if profile.data:
+                        st.session_state['user'] = profile.data[0]
+                        st.session_state['logged_in'] = True
+                        st.rerun()
+                    else: st.error("Profil tidak ditemukan di database!")
+                except Exception as e:
+                    st.error("🚫 Email tidak terdaftar atau Password salah!")
 
 if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
     login_ui()
@@ -115,8 +171,8 @@ def format_rupiah(angka):
 
 def get_idx_target_date(df):
     wib_time = datetime.utcnow() + timedelta(hours=7)
-    latest_yf_date = df.index[-1].date()
-    if latest_yf_date == wib_time.date() and wib_time.hour < 18:
+    latest_market_date = df.index[-1].date()
+    if latest_market_date == wib_time.date() and wib_time.hour < 18:
         return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
     return df.index[-1].strftime('%Y-%m-%d')
 
@@ -280,19 +336,16 @@ def run_screener(use_idx_data, stock_list, category_name):
                 if res.data:
                     df_res = pd.DataFrame(res.data)
                     
-                    # Sensor Data Asing Jika User Gratisan
                     if user_role == 'free':
                         df_res['power_asing'] = None
                         df_res['modal_asing'] = None
                         
-                    # Merapikan Urutan Kolom
                     df_res = df_res[['kode', 'harga', 'tp', 'sl', 'fase', 'power_asing', 'modal_asing', 'status', 'katalis']]
                     df_res.columns = ['Kode', 'Harga', 'TP', 'SL', 'Fase', 'Power Asing', 'Modal Asing', 'Status', 'Katalis']
                     
                     st.success(f"✅ Selesai! (Loading Instan | 0 Kuota API) - Ditemukan {len(df_res)} Saham.")
                     st.caption(f"📅 **Terakhir Diupdate oleh Server Robot:** {res.data[0]['fetch_date'] if 'fetch_date' in res.data[0] else 'Hari Ini'}")
                     
-                    # Konfigurasi Tampilan Kolom
                     col_config = {
                         "Kode": st.column_config.TextColumn(width="small"),
                         "Harga": st.column_config.NumberColumn(format="Rp %d"),
@@ -301,7 +354,6 @@ def run_screener(use_idx_data, stock_list, category_name):
                         "Katalis": st.column_config.TextColumn(width="medium")
                     }
                     
-                    # Efek Sensor di Tabel
                     if user_role == 'free':
                         col_config["Power Asing"] = st.column_config.TextColumn(default="🔒 VIP")
                         col_config["Modal Asing"] = st.column_config.TextColumn(default="🔒 VIP")
@@ -311,10 +363,10 @@ def run_screener(use_idx_data, stock_list, category_name):
 
                     st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
                 else:
-                    st.warning("⚠️ Data server IDX masih kosong hari ini (Mungkin bursa libur atau tidak ada saham yang lolos filter bandar). Silakan gunakan mode Yahoo Finance.")
+                    st.warning("⚠️ Data server IDX masih kosong hari ini (Mungkin bursa libur atau tidak ada saham yang lolos filter bandar). Silakan gunakan mode Data Standar.")
 
         # ==========================================================
-        # JALUR 2: SCANNING LIVE YFINANCE (Untuk Lapis 2 ATAU Lapis 1 Mode Gratis)
+        # JALUR 2: SCANNING LIVE (Untuk Lapis 2 ATAU Lapis 1 Mode Gratis)
         # ==========================================================
         else:
             progress = st.progress(0)
@@ -332,10 +384,9 @@ def run_screener(use_idx_data, stock_list, category_name):
                 try:
                     df = price_data[t].copy()
                     df = fix_dataframe(df)
-                    df = df[df['Volume'] > 0] # Anti Ghost Row
+                    df = df[df['Volume'] > 0] 
                     if df.empty or len(df) < 50: continue
                     
-                    # Batas volume: Lapis 1 = 5jt, Lapis 2 = 2jt
                     min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
                     if df['Volume'].iloc[-1] < min_vol: continue
                     
@@ -367,7 +418,7 @@ def run_screener(use_idx_data, stock_list, category_name):
             if results:
                 df_res = pd.DataFrame(results)
                 st.success(f"Selesai! {len(results)} Saham {category_name} Ditemukan.")
-                st.caption("🌐 **Sumber:** Yahoo Finance (Data Asing Dinonaktifkan)")
+                st.caption("🌐 **Sumber:** Data Standar (Data Asing Dinonaktifkan)") # <- Diubah di sini
                 
                 st.dataframe(df_res, use_container_width=True, hide_index=True,
                     column_config={
@@ -430,7 +481,7 @@ def show_chart(use_idx_data):
                 net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(ticker_only, idx_date)
                 if fetch_time: api_registry.add(cache_key)
             else:
-                st.warning("⚠️ Kuota Harian API Anda Habis! Menggunakan data Yahoo Finance.")
+                st.warning("⚠️ Kuota Harian API Anda Habis! Menggunakan Data Standar.") # <- Diubah di sini
             
         st.divider()
         close, volume, atr = last['Close'], last['Volume'], last.get('ATR', 0)
@@ -447,7 +498,7 @@ def show_chart(use_idx_data):
             power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
             c3.metric(f"Asing ({'🟢 AKUMULASI' if net_foreign > 0 else '🔴 DISTRIBUSI'})", format_rupiah(net_foreign), f"Dominasi: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}", delta_color="normal" if net_foreign > 0 else "inverse")
         else:
-            c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Yahoo Finance Mode / Kuota Habis", delta_color="off")
+            c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Data Standar / Kuota Habis", delta_color="off") # <- Diubah di sini
         
         is_outperform = "🌟 IHSG" in " ".join(reasons)
         eps_g = fund.get('EPS_Growth') if fund else None
@@ -490,10 +541,10 @@ mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Ch
 st.sidebar.divider()
 
 if user_role == 'free':
-    st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Yahoo Finance). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).")
+    st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Data Standar). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).") # <- Diubah di sini
     use_idx_data = False
 else:
-    data_source = st.sidebar.radio("Sumber Data:", ["🌐 Yahoo Finance (Gratis)", "🏦 Data IDX (Potong Kuota)"])
+    data_source = st.sidebar.radio("Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Potong Kuota)"]) # <- Diubah di sini
     use_idx_data = "Data IDX" in data_source
 
 st.sidebar.divider()
