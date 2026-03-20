@@ -20,11 +20,12 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # <--- KITA TURUNKAN KE VERSI PALING STABIL
+          python-version: '3.11'
 
       - name: Install Dependencies
+        # Strategi Kunci Mati: Memaksa kombinasi versi yang 100% stabil
         run: |
-          pip install "numpy<2.0.0" "pandas<3.0.0" yfinance pandas-ta requests supabase
+          pip install numpy==1.26.4 pandas==2.1.4 pandas-ta==0.3.14b0 yfinance requests supabase
 
       - name: Run Fetcher Script
         env:
