@@ -1,0 +1,30 @@
+name: JII30 Daily Screener Fetcher
+
+on:
+  schedule:
+    # Berjalan jam 19:00 WIB (12:00 UTC) Setiap Senin - Jumat
+    - cron: '0 12 * * 1-5'
+  workflow_dispatch: # Memungkinkan tombol "Run Manual" di GitHub
+
+jobs:
+  run-screener:
+    runs-only: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install pandas yfinance pandas-ta requests supabase
+
+      - name: Run Fetcher Script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          IDX_API_KEY: ${{ secrets.IDX_API_KEY }}
+        run: python fetcher.py
