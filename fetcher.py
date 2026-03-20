@@ -15,7 +15,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
 
-# --- 2. FUNGSI TEKNIKAL (Sama persis dengan app.py) ---
+# --- 2. FUNGSI TEKNIKAL & PENDETEKSI HARI LIBUR ---
 def check_candlestick_patterns(curr, prev):
     score = 0; patterns = []
     try:
@@ -42,6 +42,15 @@ def get_ihsg_data():
         return ihsg[['Close']].rename(columns={'Close': 'IHSG_Close'})
     except: return pd.DataFrame()
 
+# 🧠 OTAK BARU: Pendeteksi Tanggal Bursa Terakhir yang Valid
+def get_idx_target_date(df):
+    wib_time = datetime.utcnow() + timedelta(hours=7)
+    latest_yf_date = df.index[-1].date()
+    if latest_yf_date == wib_time.date() and wib_time.hour < 18:
+        return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
+    else:
+        return df.index[-1].strftime('%Y-%m-%d')
+
 # --- 3. PROSES UTAMA SCREENING ---
 print(f"[{datetime.utcnow()}] 🚀 Memulai Auto-Screening JII30...")
 ihsg_df = get_ihsg_data()
@@ -49,7 +58,6 @@ tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
 price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
 
 results = []
-today_str = (datetime.utcnow() + timedelta(hours=7)).strftime('%Y-%m-%d')
 
 for t in tickers:
     try:
@@ -59,6 +67,9 @@ for t in tickers:
         df = df.loc[:, ~df.columns.duplicated()]
         
         if df.empty or len(df) < 50 or df['Volume'].iloc[-1] < 5000000: continue
+        
+        # 🎯 Menentukan Tanggal Anti-Libur untuk API GOAPI
+        target_date = get_idx_target_date(df)
         
         df['Rsi'] = df.ta.rsi(length=14)
         df = pd.concat([df, df.ta.macd(fast=12, slow=26, signal=9), df.ta.bbands(length=20, std=2)], axis=1)
@@ -78,7 +89,6 @@ for t in tickers:
         curr, prev = df.iloc[-1], df.iloc[-2]
         close, volume, atr = curr['Close'], curr['Volume'], curr.get('ATR', 0)
         
-        # Penilaian Singkat
         score = 0; reasons = []
         if curr['Close'] > curr.get('EMA200', 0): score += 1; reasons.append("📈 Uptrend")
         if curr.get('Stock_Ret_20', 0) > curr.get('IHSG_Ret_20', 0): score += 1.5; reasons.append("🌟 IHSG")
@@ -95,13 +105,13 @@ for t in tickers:
         if score >= 4 or "Accumulation" in wyckoff: rec = "✅ BUY"
         if score >= 6: rec = "💎 STRONG BUY"
         
-        if score < 3 and "Accumulation" not in wyckoff: continue # Skip jika jelek
+        if score < 3 and "Accumulation" not in wyckoff: continue 
 
-        # 4. TARIK DATA ASING (HANYA YANG LOLOS SCREENING)
+        # 4. TARIK DATA ASING DENGAN TANGGAL ANTI-LIBUR
         symbol = t.replace(".JK", "")
         net_foreign, avg_buy_price, power_pct = 0, 0, 0
         
-        url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={today_str}&investor=FOREIGN"
+        url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers={'accept': 'application/json', 'X-API-KEY': IDX_API_KEY})
         if res_broker.status_code == 200:
             data = res_broker.json().get('data', {}).get('results', [])
@@ -112,13 +122,13 @@ for t in tickers:
             if buy_lot > 0: avg_buy_price = buy_val / (buy_lot * 100)
             if (close * volume) > 0: power_pct = (abs(net_foreign) / (close * volume)) * 100
 
-        if net_foreign <= 0: continue # Skip jika asing jualan
+        if net_foreign <= 0: continue 
 
         target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
         stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
 
         results.append({
-            "fetch_date": today_str,
+            "fetch_date": target_date,
             "kode": symbol,
             "harga": int(close),
             "tp": int(target_profit),
@@ -129,16 +139,18 @@ for t in tickers:
             "status": rec,
             "katalis": ", ".join(reasons)
         })
-        print(f"✅ Lolos: {symbol}")
+        print(f"✅ Lolos: {symbol} (Tgl: {target_date})")
     except Exception as e:
         print(f"❌ Error {t}: {e}")
 
 # --- 5. SIMPAN KE SUPABASE ---
 if results:
-    # Hapus data hari ini jika sudah ada (mencegah duplikat jika di-run manual 2x)
-    supabase.table('jii30_daily_data').delete().eq('fetch_date', today_str).execute()
-    # Insert data baru
+    # Hapus data sebelumnya di tanggal yang sama (mencegah duplikat)
+    unique_dates = list(set([r['fetch_date'] for r in results]))
+    for d in unique_dates:
+        supabase.table('jii30_daily_data').delete().eq('fetch_date', d).execute()
+        
     supabase.table('jii30_daily_data').insert(results).execute()
     print(f"[{datetime.utcnow()}] 🎉 Sukses menyimpan {len(results)} saham ke Database!")
 else:
-    print(f"[{datetime.utcnow()}] ⚠️ Tidak ada saham yang lolos kriteria hari ini.")
+    print(f"[{datetime.utcnow()}] ⚠️ Tidak ada saham yang lolos kriteria.")
