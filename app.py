@@ -2,8 +2,8 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
-import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 import requests
 import numpy as np
 import time
@@ -61,44 +61,19 @@ def get_api_registry():
 
 api_registry = get_api_registry()
 
-# --- 5. CSS FIX (JUBAH GAIB DIPERBAIKI & STYLING TABEL HTML) ---
+# --- 5. CSS FIX & JUBAH GAIB (VERSI AMAN) ---
 st.markdown("""
 <style>
-    /* 1. Sembunyikan HANYA menu kanan atas & tulisan deploy, biarkan tombol Sidebar Kiri hidup */
-    [data-testid="stToolbar"] {display: none !important;}
-    footer {display: none !important;}
-
-    /* 2. Styling Visual Kotak Metrik (Milik Advanced Chart) */
+    /* Menyembunyikan Menu Kanan Atas dan Deploy, TAPI biarkan Header/Sidebar hidup */
+    .stAppDeployButton {display:none;}
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* Styling Visual Metric */
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
     [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; white-space: normal !important; }
     [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; white-space: normal !important; line-height: 1.2 !important; }
     [data-testid="stMetricDelta"] div { font-size: 0.95rem !important; white-space: normal !important; }
-    
-    /* 3. Styling Khusus Tabel Dataframe (Memaksa Teks Turun Ke Bawah) */
-    .styled-table {
-        border-collapse: collapse;
-        margin: 25px 0;
-        font-size: 0.9em;
-        font-family: sans-serif;
-        width: 100%;
-        box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-        border-radius: 8px 8px 0 0;
-        overflow: hidden;
-    }
-    .styled-table thead tr {
-        background-color: #f0f2f6;
-        color: #31333F;
-        text-align: left;
-        font-weight: bold;
-    }
-    .styled-table th, .styled-table td {
-        padding: 12px 15px;
-        vertical-align: top;
-        border-bottom: 1px solid #dddddd;
-    }
-    .styled-table tbody tr:last-of-type {
-        border-bottom: 2px solid #009879;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -199,9 +174,6 @@ def get_fundamental_info(symbol):
         info = ticker.info
         return {
             "PBV": info.get('priceToBook', None),
-            "ROE": info.get('returnOnEquity', None), 
-            "DER": info.get('debtToEquity', None),
-            "DivYield": info.get('dividendYield', None),
             "EPS_Growth": info.get('earningsQuarterlyGrowth', None)
         }
     except: return None
@@ -258,10 +230,10 @@ def advanced_analysis(df):
     
     close, ma20, ma50, cmf = curr['Close'], curr['SMA20'], curr['SMA50'], curr['CMF']
     phase = "Sideways/Noise"
-    if close > ma20 and ma20 > ma50: phase = "🔵 Markup (Naik)"
-    elif close < ma20 and ma20 < ma50: phase = "🟠 Markdown (Turun)"
-    elif close > ma50 and cmf < 0: phase = "🔴 Distribution (Pucuk)"
-    elif close < ma50 and cmf > 0: phase = "🟢 Accumulation (Bawah)"
+    if close > ma20 and ma20 > ma50: phase = "🔵 Markup"
+    elif close < ma20 and ma20 < ma50: phase = "🟠 Markdown"
+    elif close > ma50 and cmf < 0: phase = "🔴 Distribution"
+    elif close < ma50 and cmf > 0: phase = "🟢 Accumulation"
 
     divergence = "-"
     if len(df) > 10:
@@ -322,7 +294,8 @@ def score_analysis(df, fund_data):
     if patterns: reasons.append(f"🕯️ {patterns[0]}")
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
-# --- 10. FITUR SCREENER (DENGAN TABEL HTML KUSTOM) ---
+
+# --- 10. FITUR SCREENER (DENGAN COLUMN CONFIG NATIVE) ---
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     if use_idx_data: 
@@ -405,19 +378,19 @@ def run_screener(use_idx_data, stock_list, category_name):
 
                 status_ihsg = "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform"
 
-                # Pemisah baris menggunakan tag HTML <br> agar turun ke bawah
-                formatted_reasons = "<br>".join([f"• {r.strip()}" for r in reasons])
-                formatted_target = f"TP: Rp {int(target_profit):,}<br>SL: Rp {int(stop_loss):,}"
+                # PENGGUNAAN \n standar (Bukan <br>) karena kita kembali menggunakan dataframe native Streamlit
+                formatted_reasons = "\n".join([f"• {r.strip()}" for r in reasons])
+                formatted_target = f"TP: Rp {int(target_profit):,}\nSL: Rp {int(stop_loss):,}"
 
                 results.append({
                     "Kode": symbol_only,
-                    "Harga": int(close),
-                    "Target_SL": formatted_target,
-                    "Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
-                    "Vs_IHSG": status_ihsg,
+                    "Harga": f"Rp {int(close):,}",
+                    "Target & SL": formatted_target,
+                    "Fase Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
+                    "Vs IHSG": status_ihsg,
                     "Asing": f"{power_pct:.1f}%" if use_idx_data and net_foreign is not None else "-",
-                    "Rek": rec,
-                    "Alasan": formatted_reasons
+                    "Status": rec,
+                    "Poin Analisa (Alasan Utama)": formatted_reasons
                 })
             except Exception as loop_e: 
                 continue
@@ -426,37 +399,23 @@ def run_screener(use_idx_data, stock_list, category_name):
         status.empty()
         
         if results:
+            df_res = pd.DataFrame(results)
             st.success(f"Selesai! {len(results)} Saham Terbaik Ditemukan.")
             if use_idx_data and last_sync_time:
                 st.caption(f"📅 **Data Harga Per:** {last_bursa_date} | 🔄 **Data Asing Diambil Tgl:** {idx_date_used} (Sync: {last_sync_time})")
             elif last_bursa_date:
                 st.caption(f"📅 **Data Bursa Per:** {last_bursa_date} | 🌐 **Sumber Bandar:** Yahoo Finance")
             
-            # --- PEMBUATAN TABEL HTML KUSTOM (ANTI-GESER KANAN) ---
-            html_table = "<table class='styled-table'>"
-            html_table += "<thead><tr><th>Kode</th><th>Harga</th><th>Target / SL</th><th>Wyckoff</th><th>Vs IHSG</th><th>Dominasi Asing</th><th>Status</th><th>Poin Analisa (Alasan)</th></tr></thead><tbody>"
-            
-            for r in results:
-                # Memberi warna khusus untuk rekomendasi
-                rek_color = "#009879" if "BUY" in r['Rek'] else "#d9534f"
-                
-                html_table += f"""
-                <tr>
-                    <td><strong>{r['Kode']}</strong></td>
-                    <td>Rp {r['Harga']:,}</td>
-                    <td>{r['Target_SL']}</td>
-                    <td>{r['Wyckoff']}</td>
-                    <td>{r['Vs_IHSG']}</td>
-                    <td>{r['Asing']}</td>
-                    <td><strong style='color:{rek_color}'>{r['Rek']}</strong></td>
-                    <td>{r['Alasan']}</td>
-                </tr>
-                """
-            html_table += "</tbody></table>"
-            
-            # Render HTML ke layar Streamlit
-            st.markdown(html_table, unsafe_allow_html=True)
-            
+            # --- RAHASIA TEKS TURUN KE BAWAH: st.column_config ---
+            st.dataframe(
+                df_res, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Target & SL": st.column_config.TextColumn(width="medium"),
+                    "Poin Analisa (Alasan Utama)": st.column_config.TextColumn(width="large")
+                }
+            )
         else:
             st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
 
