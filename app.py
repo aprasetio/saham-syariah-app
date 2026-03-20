@@ -102,8 +102,28 @@ st.markdown("""
     footer {visibility: hidden;}
     
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
-    [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; }
-    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; }
+    
+    /* --- CSS KHUSUS TABEL ANTI-GESER --- */
+    .custom-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: sans-serif;
+        font-size: 0.9em;
+        margin-top: 15px;
+    }
+    .custom-table thead tr {
+        background-color: #f0f2f6;
+        color: #31333F;
+        text-align: left;
+    }
+    .custom-table th, .custom-table td {
+        padding: 12px 15px;
+        border-bottom: 1px solid #ddd;
+        vertical-align: top;
+    }
+    .custom-table tbody tr:hover {
+        background-color: #f9f9f9;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -352,17 +372,16 @@ def run_screener(use_idx_data, stock_list, category_name):
                 cache_key = f"{symbol_only}_{idx_date}"
                 
                 if use_idx_data:
-                    # CEK & POTONG KUOTA API
                     if check_and_deduct_quota(cache_key):
                         status.text(f"Menarik Data IDX: {t} ...")
                         time.sleep(1) 
                         net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(symbol_only, idx_date)
                         if fetch_time: 
                             last_sync_time = fetch_time 
-                            api_registry.add(cache_key) # Simpan ke cache agar user lain gratis!
+                            api_registry.add(cache_key) 
                     else:
                         st.sidebar.error("❌ Limit Kuota Harian Habis!")
-                        use_idx_data = False # Paksa matikan jika limit habis
+                        use_idx_data = False 
                 
                 if net_foreign is not None and net_foreign <= 0: continue
                 
@@ -372,18 +391,22 @@ def run_screener(use_idx_data, stock_list, category_name):
                     modal_str = f" Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else ""
                     reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}{power_str} |{modal_str}")
 
-                formatted_reasons = "\n".join([f"• {r.strip()}" for r in reasons])
-                formatted_target = f"TP: Rp {int(target_profit):,}\nSL: Rp {int(stop_loss):,}"
+                # Menggunakan tag HTML <br> untuk memaksa baris baru di tabel
+                formatted_reasons = "<br>".join([f"• {r.strip()}" for r in reasons])
+                formatted_target = f"TP: Rp {int(target_profit):,}<br>SL: Rp {int(stop_loss):,}"
+                
+                # Warna otomatis untuk Rekomendasi
+                rek_color = "#009879" if "BUY" in rec else "#d9534f"
 
                 results.append({
-                    "Kode": symbol_only,
+                    "Kode": f"<b>{symbol_only}</b>",
                     "Harga": f"Rp {int(close):,}",
                     "Target & SL": formatted_target,
                     "Fase Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
                     "Vs IHSG": "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform",
                     "Asing": f"{power_pct:.1f}%" if net_foreign is not None else "-",
-                    "Status": rec,
-                    "Poin Analisa": formatted_reasons
+                    "Status": f"<strong style='color:{rek_color};'>{rec}</strong>",
+                    "Poin Analisa (Alasan)": formatted_reasons
                 })
             except Exception as loop_e: continue
             
@@ -393,10 +416,22 @@ def run_screener(use_idx_data, stock_list, category_name):
         if results:
             df_res = pd.DataFrame(results)
             st.success(f"Selesai! {len(results)} Saham Ditemukan.")
-            st.dataframe(
-                df_res, use_container_width=True, hide_index=True,
-                column_config={"Target & SL": st.column_config.TextColumn(width="medium"), "Poin Analisa": st.column_config.TextColumn(width="large")}
-            )
+            
+            # Perbaikan Info Waktu agar selalu muncul
+            waktu_info = f"📅 **Data Harga Per:** {last_bursa_date}"
+            if use_idx_data:
+                # Jika last_sync_time gagal ditangkap, ambil waktu sekarang
+                sync_time_disp = last_sync_time if last_sync_time else (datetime.utcnow() + timedelta(hours=7)).strftime("%d %b %Y, %H:%M WIB")
+                waktu_info += f" | 🔄 **Data Asing Diambil Tgl:** {idx_date_used} (Sync: {sync_time_disp})"
+            else:
+                waktu_info += " | 🌐 **Sumber Bandar:** Yahoo Finance"
+            
+            st.caption(waktu_info)
+            
+            # Render Tabel Pandas ke HTML murni (Anti-geser)
+            html_table = df_res.to_html(escape=False, index=False, classes="custom-table")
+            st.markdown(html_table, unsafe_allow_html=True)
+            
         else:
             st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
 
