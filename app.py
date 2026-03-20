@@ -8,91 +8,112 @@ import requests
 import numpy as np
 import time
 from datetime import datetime, timedelta
+from supabase import create_client, Client
 
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", page_icon="🏦")
 
-# --- DAFTAR ADMIN ---
-ADMIN_USERS = ["bos_besar", "admin_utama", "aprasetio"] 
+# --- 2. INISIALISASI SUPABASE ---
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
 
-# --- 2. SISTEM LOGIN AMAN ---
-def check_password():
-    def password_entered():
-        if st.session_state["username"] in st.secrets["passwords"] and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"] 
-        else:
-            st.session_state["password_correct"] = False
+supabase = init_supabase()
 
-    if "password_correct" not in st.session_state:
-        st.markdown("<h1 style='text-align: center;'>🔒 Gerbang Keamanan</h1>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Login", on_click=password_entered, use_container_width=True)
-        return False
-    elif not st.session_state["password_correct"]:
-        st.markdown("<h1 style='text-align: center;'>🔒 Gerbang Keamanan</h1>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Login", on_click=password_entered, use_container_width=True)
-            st.error("🚫 Username tidak dikenal atau Password salah!")
-        return False
-    else:
-        return True
-
-if not check_password():
-    st.stop()
-
-# --- 3. AMBIL DATA RAHASIA & STATUS ADMIN ---
-IDX_API_KEY = st.secrets.get("IDX_API_KEY", st.secrets.get("GOAPI_KEY", ""))
-admin_list = st.secrets.get("ADMIN_USERS", ADMIN_USERS)
-
-current_user = st.session_state.get('username', '')
-is_admin = current_user in admin_list
-
-# --- 4. BUKU TAMU GLOBAL (SHARED CACHE REGISTRY) ---
+# --- 3. BUKU TAMU GLOBAL (SHARED CACHE REGISTRY) ---
 @st.cache_resource
 def get_api_registry():
     return set()
 
 api_registry = get_api_registry()
 
-# --- 5. CSS FIX & JUBAH GAIB (VERSI AMAN) ---
+# --- 4. SISTEM LOGIN SAAS (SUPABASE AUTH) ---
+def login_ui():
+    st.markdown("<h1 style='text-align: center;'>🔒 Portal Login Member</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        if st.button("Login", use_container_width=True):
+            try:
+                # Coba login via Supabase
+                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                
+                # Ambil data profil (Role & Kuota)
+                profile = supabase.table('profiles').select('*').eq('id', res.user.id).execute()
+                
+                if profile.data:
+                    st.session_state['user'] = profile.data[0]
+                    st.session_state['logged_in'] = True
+                    st.rerun()
+                else:
+                    st.error("Profil tidak ditemukan di database!")
+            except Exception as e:
+                st.error("🚫 Email tidak terdaftar atau Password salah!")
+
+if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
+    login_ui()
+    st.stop()
+
+# --- AMBIL DATA USER SAAT INI ---
+user_data = st.session_state['user']
+user_id = user_data['id']
+user_role = user_data['role'] # 'admin', 'vip', 'trial', 'free'
+user_email = user_data['email']
+is_admin = (user_role == 'admin')
+
+# --- 5. LOGIKA PEMOTONGAN KUOTA API (BILLING SYSTEM) ---
+def check_and_deduct_quota(cache_key):
+    # 1. Jika data sudah ada di Cache Global, GRATIS! (Tidak potong kuota)
+    if cache_key in api_registry:
+        return True
+        
+    # 2. Jika Admin, bebas tanpa batas
+    if is_admin:
+        return True
+        
+    # 3. Ambil data terbaru dari database
+    res = supabase.table('profiles').select('daily_quota, used_quota, last_reset_date').eq('id', user_id).execute()
+    db_user = res.data[0]
+    
+    today_str = datetime.utcnow().strftime('%Y-%m-%d')
+    used_quota = db_user['used_quota']
+    
+    # 4. Reset harian jika berganti hari
+    if db_user['last_reset_date'] != today_str:
+        used_quota = 0
+        supabase.table('profiles').update({'used_quota': 0, 'last_reset_date': today_str}).eq('id', user_id).execute()
+        
+    # 5. Cek apakah kuota masih cukup
+    if used_quota < db_user['daily_quota']:
+        # Potong kuota!
+        supabase.table('profiles').update({'used_quota': used_quota + 1}).eq('id', user_id).execute()
+        return True
+    else:
+        return False
+
+# --- 6. CSS FIX & JUBAH GAIB ---
 st.markdown("""
 <style>
-    /* Menyembunyikan Menu Kanan Atas dan Deploy, TAPI biarkan Header/Sidebar hidup */
     .stAppDeployButton {display:none;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* Styling Visual Metric */
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
-    [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; white-space: normal !important; }
-    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; white-space: normal !important; line-height: 1.2 !important; }
-    [data-testid="stMetricDelta"] div { font-size: 0.95rem !important; white-space: normal !important; }
+    [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; }
+    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 6. DAFTAR SAHAM ---
-SHARIA_STOCKS = [
-    "ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", 
-    "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", 
-    "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", 
-    "AMRT", "ASII", "TPIA"
-]
+# --- 7. DAFTAR SAHAM ---
+SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
+SHARIA_MIDCAP_STOCKS = ["BRMS", "ELSA", "ENRG", "PTRO", "SIDO", "MYOR", "ESSA", "CTRA", "BSDE", "SMRA", "PWON", "ARTO", "BTPS", "MIKA", "HEAL", "SILO", "MAPA", "AUTO", "SMSM", "TAPG", "DSNG", "LSIP", "AALI", "WIKA", "PTPP", "TOTL", "NRCA", "SCMA", "MNCN", "ERAA"]
 
-SHARIA_MIDCAP_STOCKS = [
-    "BRMS", "ELSA", "ENRG", "PTRO", "SIDO", "MYOR", "ESSA", "CTRA", "BSDE",
-    "SMRA", "PWON", "ARTO", "BTPS", "MIKA", "HEAL", "SILO", "MAPA", "AUTO",
-    "SMSM", "TAPG", "DSNG", "LSIP", "AALI", "WIKA", "PTPP", "TOTL", "NRCA",
-    "SCMA", "MNCN", "ERAA"
-]
+IDX_API_KEY = st.secrets.get("IDX_API_KEY", "")
 
-# --- 7. HELPER FUNCTIONS ---
+# --- 8. HELPER & FETCH FUNCTIONS ---
 def fix_dataframe(df):
     if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -119,7 +140,6 @@ def get_idx_target_date(df):
     else:
         return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 8. FUNGSI FETCH IHSG & FUNDAMENTAL & DATA IDX ---
 @st.cache_data(ttl=3600)
 def get_ihsg_data():
     try:
@@ -131,11 +151,7 @@ def get_ihsg_data():
 
 @st.cache_data(ttl=43200)
 def fetch_idx_foreign_flow(symbol, target_date):
-    headers = {
-        'accept': 'application/json', 
-        'X-API-KEY': IDX_API_KEY,
-        'User-Agent': 'Mozilla/5.0'
-    }
+    headers = {'accept': 'application/json', 'X-API-KEY': IDX_API_KEY, 'User-Agent': 'Mozilla/5.0'}
     net_foreign, avg_buy_price = 0, 0
     wib_time = datetime.utcnow() + timedelta(hours=7)
     fetch_time = wib_time.strftime("%d %b %Y, %H:%M WIB")
@@ -143,9 +159,7 @@ def fetch_idx_foreign_flow(symbol, target_date):
     try:
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
-        if res_broker.status_code != 200:
-            st.sidebar.error(f"🚨 Data IDX Error {symbol}: {res_broker.status_code}")
-            return None, 0, None
+        if res_broker.status_code != 200: return None, 0, None
         
         res_broker_json = res_broker.json()
         total_buy_val, total_buy_lot, total_sell_val = 0, 0, 0
@@ -161,24 +175,18 @@ def fetch_idx_foreign_flow(symbol, target_date):
             net_foreign = total_buy_val - total_sell_val
             if total_buy_lot > 0:
                 avg_buy_price = total_buy_val / (total_buy_lot * 100)
-    except Exception as e: 
-        st.sidebar.error(f"🔌 Koneksi API Terputus: {e}")
-        return None, 0, None
+    except Exception as e: return None, 0, None
         
     return net_foreign, avg_buy_price, fetch_time
 
 @st.cache_data(ttl=3600) 
 def get_fundamental_info(symbol):
     try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        return {
-            "PBV": info.get('priceToBook', None),
-            "EPS_Growth": info.get('earningsQuarterlyGrowth', None)
-        }
+        info = yf.Ticker(symbol).info
+        return {"PBV": info.get('priceToBook', None), "EPS_Growth": info.get('earningsQuarterlyGrowth', None)}
     except: return None
 
-# --- 9. FUNGSI TEKNIKAL & RELATIVE STRENGTH ---
+# --- 9. FUNGSI TEKNIKAL ---
 def check_candlestick_patterns(curr, prev):
     score = 0
     patterns = []
@@ -220,7 +228,6 @@ def calculate_metrics(df, ihsg_df=None):
             df['IHSG_Close'] = df['IHSG_Close'].ffill() 
             df['Stock_Ret_20'] = (df['Close'] - df['Close'].shift(20)) / df['Close'].shift(20)
             df['IHSG_Ret_20'] = (df['IHSG_Close'] - df['IHSG_Close'].shift(20)) / df['IHSG_Close'].shift(20)
-            
     except: pass
     return df
 
@@ -247,7 +254,6 @@ def advanced_analysis(df):
 def score_analysis(df, fund_data):
     if df.empty or len(df)<2: return 0, 0, 0, 0, ["Data Kurang"], df.iloc[-1]
     curr, prev = df.iloc[-1], df.iloc[-2]
-    
     score_tech, score_fund, score_bandar, score_candle = 0, 0, 0, 0
     reasons = []
     
@@ -264,10 +270,8 @@ def score_analysis(df, fund_data):
         reasons.append("📈 Tren Mayor Naik")
 
     if 'Stock_Ret_20' in df.columns and 'IHSG_Ret_20' in df.columns:
-        stock_ret = curr['Stock_Ret_20']
-        ihsg_ret = curr['IHSG_Ret_20']
-        if not pd.isna(stock_ret) and not pd.isna(ihsg_ret):
-            if stock_ret > ihsg_ret:
+        if not pd.isna(curr['Stock_Ret_20']) and not pd.isna(curr['IHSG_Ret_20']):
+            if curr['Stock_Ret_20'] > curr['IHSG_Ret_20']:
                 score_tech += 1.5 
                 reasons.append(f"🌟 Outperform IHSG")
         
@@ -282,10 +286,8 @@ def score_analysis(df, fund_data):
     elif rsi > 70: score_tech -= 1
     
     if fund_data:
-        pbv = fund_data.get('PBV')
-        eps_g = fund_data.get('EPS_Growth')
-        if pbv and pbv < 1.5: score_fund += 2
-        if eps_g and eps_g > 0.10: 
+        if fund_data.get('PBV') and fund_data.get('PBV') < 1.5: score_fund += 2
+        if fund_data.get('EPS_Growth') and fund_data.get('EPS_Growth') > 0.10: 
             score_fund += 2
             reasons.append(f"🚀 Laba Tumbuh")
         
@@ -295,13 +297,9 @@ def score_analysis(df, fund_data):
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
-# --- 10. FITUR SCREENER (DENGAN COLUMN CONFIG NATIVE) ---
+# --- 10. FITUR SCREENER ---
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
-    if use_idx_data: 
-        st.success("🏦 Mode Data IDX: Memfilter Foreign Flow & Harga Modal Bandar aktif.")
-    else: 
-        st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Fokus Pergerakan Bandar Lokal & Teknikal).")
     
     if st.button("MULAI SCANNING"):
         progress = st.progress(0)
@@ -311,7 +309,6 @@ def run_screener(use_idx_data, stock_list, category_name):
         
         status.text("Mengambil Data IHSG (Benchmark)...")
         ihsg_df = get_ihsg_data()
-        
         price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
         last_sync_time, last_bursa_date, idx_date_used = None, None, None
@@ -324,8 +321,7 @@ def run_screener(use_idx_data, stock_list, category_name):
                 df = price_data[t].copy()
                 df = fix_dataframe(df)
                 if df.empty or len(df) < 50: continue
-                min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
-                if df['Volume'].iloc[-1] < min_vol: continue
+                if df['Volume'].iloc[-1] < (5000000 if category_name == "Lapis 1 (JII30)" else 2000000): continue
                 
                 df = calculate_metrics(df, ihsg_df)
                 fund = get_fundamental_info(t)
@@ -334,41 +330,41 @@ def run_screener(use_idx_data, stock_list, category_name):
                 total_score = s_tech + s_fund + s_bandar + s_candle
                 
                 atr = last.get('ATR', 0)
-                close = last['Close']
-                volume = last['Volume']
+                close, volume = last['Close'], last['Volume']
                 daily_turnover = close * volume 
                 
-                if atr > 0:
-                    stop_loss = close - (1.5 * atr) 
-                    target_profit = close + (3.0 * atr) 
-                else:
-                    stop_loss, target_profit = close * 0.9, close * 1.1
+                stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
+                target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
                 
                 rec = "WAIT"
-                if total_score >= 6 or "BULLISH DIV" in divergence or "ALL ABOVE MA" in " ".join(reasons): 
-                    rec = "💎 STRONG BUY"
-                elif total_score >= 4 or "Accumulation" in wyckoff_phase: 
-                    rec = "✅ BUY"
+                if total_score >= 6 or "BULLISH DIV" in divergence or "ALL ABOVE MA" in " ".join(reasons): rec = "💎 STRONG BUY"
+                elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
                 
                 if total_score < 3 and "BULLISH DIV" not in divergence and "Accumulation" not in wyckoff_phase and "ALL ABOVE MA" not in " ".join(reasons):
                     continue
                 
                 symbol_only = t.replace(".JK", "")
                 net_foreign, avg_buy_price, power_pct = None, 0, 0
-                
                 idx_date = get_idx_target_date(df)
                 idx_date_used = idx_date
                 last_bursa_date = df.index[-1].strftime('%d %b %Y') 
                 
+                cache_key = f"{symbol_only}_{idx_date}"
+                
                 if use_idx_data:
-                    status.text(f"Menarik Data IDX: {t} ...")
-                    time.sleep(1) 
-                    net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(symbol_only, idx_date)
-                    if fetch_time: last_sync_time = fetch_time 
-                    
-                    api_registry.add(f"{symbol_only}_{idx_date}")
-                    
-                    if net_foreign is not None and net_foreign <= 0: continue
+                    # CEK & POTONG KUOTA API
+                    if check_and_deduct_quota(cache_key):
+                        status.text(f"Menarik Data IDX: {t} ...")
+                        time.sleep(1) 
+                        net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(symbol_only, idx_date)
+                        if fetch_time: 
+                            last_sync_time = fetch_time 
+                            api_registry.add(cache_key) # Simpan ke cache agar user lain gratis!
+                    else:
+                        st.sidebar.error("❌ Limit Kuota Harian Habis!")
+                        use_idx_data = False # Paksa matikan jika limit habis
+                
+                if net_foreign is not None and net_foreign <= 0: continue
                 
                 if net_foreign is not None:
                     if daily_turnover > 0: power_pct = (abs(net_foreign) / daily_turnover) * 100
@@ -376,9 +372,6 @@ def run_screener(use_idx_data, stock_list, category_name):
                     modal_str = f" Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else ""
                     reasons.append(f"🌐 ASING: {format_rupiah(net_foreign)}{power_str} |{modal_str}")
 
-                status_ihsg = "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform"
-
-                # PENGGUNAAN \n standar (Bukan <br>) karena kita kembali menggunakan dataframe native Streamlit
                 formatted_reasons = "\n".join([f"• {r.strip()}" for r in reasons])
                 formatted_target = f"TP: Rp {int(target_profit):,}\nSL: Rp {int(stop_loss):,}"
 
@@ -387,34 +380,22 @@ def run_screener(use_idx_data, stock_list, category_name):
                     "Harga": f"Rp {int(close):,}",
                     "Target & SL": formatted_target,
                     "Fase Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
-                    "Vs IHSG": status_ihsg,
-                    "Asing": f"{power_pct:.1f}%" if use_idx_data and net_foreign is not None else "-",
+                    "Vs IHSG": "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform",
+                    "Asing": f"{power_pct:.1f}%" if net_foreign is not None else "-",
                     "Status": rec,
-                    "Poin Analisa (Alasan Utama)": formatted_reasons
+                    "Poin Analisa": formatted_reasons
                 })
-            except Exception as loop_e: 
-                continue
+            except Exception as loop_e: continue
             
         progress.empty()
         status.empty()
         
         if results:
             df_res = pd.DataFrame(results)
-            st.success(f"Selesai! {len(results)} Saham Terbaik Ditemukan.")
-            if use_idx_data and last_sync_time:
-                st.caption(f"📅 **Data Harga Per:** {last_bursa_date} | 🔄 **Data Asing Diambil Tgl:** {idx_date_used} (Sync: {last_sync_time})")
-            elif last_bursa_date:
-                st.caption(f"📅 **Data Bursa Per:** {last_bursa_date} | 🌐 **Sumber Bandar:** Yahoo Finance")
-            
-            # --- RAHASIA TEKS TURUN KE BAWAH: st.column_config ---
+            st.success(f"Selesai! {len(results)} Saham Ditemukan.")
             st.dataframe(
-                df_res, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "Target & SL": st.column_config.TextColumn(width="medium"),
-                    "Poin Analisa (Alasan Utama)": st.column_config.TextColumn(width="large")
-                }
+                df_res, use_container_width=True, hide_index=True,
+                column_config={"Target & SL": st.column_config.TextColumn(width="medium"), "Poin Analisa": st.column_config.TextColumn(width="large")}
             )
         else:
             st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
@@ -422,11 +403,9 @@ def run_screener(use_idx_data, stock_list, category_name):
 # --- 11. FITUR CHART DETAIL ---
 def show_chart(use_idx_data):
     st.header("📊 Deep Analysis & Target Tracker")
-    
     with st.form(key='chart_search_form'):
         c_input, c_btn = st.columns([4, 1])
-        with c_input:
-            ticker = st.text_input("Masukkan Kode Saham (Contoh: BRMS, ELSA, PTBA)", "").upper()
+        with c_input: ticker = st.text_input("Masukkan Kode Saham", "").upper()
         with c_btn:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_search = st.form_submit_button("Cari Saham 🔍")
@@ -438,7 +417,7 @@ def show_chart(use_idx_data):
         ihsg_df = get_ihsg_data()
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
         if df.empty:
-            st.error("Saham tidak ditemukan di Yahoo Finance!")
+            st.error("Saham tidak ditemukan!")
             return
 
         df = calculate_metrics(df, ihsg_df)
@@ -446,141 +425,109 @@ def show_chart(use_idx_data):
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
         wyckoff_phase, divergence = advanced_analysis(df)
         
+        idx_date = get_idx_target_date(df)
+        cache_key = f"{ticker_only}_{idx_date}"
         net_foreign, avg_buy_price, fetch_time = None, 0, None
         
-        idx_date = get_idx_target_date(df)
-        last_date_disp = df.index[-1].strftime('%d %b %Y')
-        
-        # --- PERLINDUNGAN KUOTA (SMART WHITELIST) ---
-        cache_key = f"{ticker_only}_{idx_date}"
-        if use_idx_data and not is_admin:
-            if cache_key not in api_registry:
-                st.info(f"ℹ️ **Info:** Saham {ticker_only} belum terdapat di dalam data Smart Screener hari ini. Aplikasi otomatis menggunakan data Yahoo Finance.")
-                use_idx_data = False
-        
         if use_idx_data:
-            net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(ticker_only, idx_date)
-            if is_admin:
-                api_registry.add(cache_key)
+            if check_and_deduct_quota(cache_key):
+                net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(ticker_only, idx_date)
+                if fetch_time: api_registry.add(cache_key)
+            else:
+                st.warning("⚠️ Kuota Harian API Anda Habis! Menggunakan data Yahoo Finance.")
             
         st.divider()
-        
-        if use_idx_data and fetch_time:
-            st.caption(f"📅 **Harga Per:** {last_date_disp} | 🔄 **Asing Diambil Tgl:** {idx_date} (Sync: {fetch_time})")
-        else:
-            st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Estimasi / Tanpa Asing)")
-        
-        atr = last.get('ATR', 0)
-        close = last['Close']
-        volume = last['Volume']
+        close, volume, atr = last['Close'], last['Volume'], last.get('ATR', 0)
         daily_turnover = close * volume
-        
-        if atr > 0:
-            stop_loss = close - (1.5 * atr)
-            target_profit = close + (3.0 * atr)
-            tp_pct = ((target_profit - close) / close) * 100
-        else:
-            stop_loss, target_profit, tp_pct = close, close, 0
+        stop_loss = close - (1.5 * atr) if atr > 0 else close
+        target_profit = close + (3.0 * atr) if atr > 0 else close
+        tp_pct = ((target_profit - close) / close) * 100 if atr > 0 else 0
             
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", wyckoff_phase)
-        c2.metric("Target (TP) & Stop Loss", f"Rp {int(target_profit):,}", f"Cut Loss: Rp {int(stop_loss):,} (+{tp_pct:.1f}% TP)", delta_color="normal")
+        c2.metric("Target & Stop Loss", f"Rp {int(target_profit):,}", f"Cut Loss: Rp {int(stop_loss):,} (+{tp_pct:.1f}%)", delta_color="normal")
         
         if net_foreign is not None:
             power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
-            foreign_label = "🟢 AKUMULASI" if net_foreign > 0 else ("🔴 DISTRIBUSI" if net_foreign < 0 else "⚪ NETRAL")
-            power_info = f"Dominasi Asing: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}" if avg_buy_price > 0 else f"Dominasi Asing: {power_pct:.1f}%"
-            if power_pct >= 10: power_info = "🔥 " + power_info
-            c3.metric(f"Asing ({foreign_label})", format_rupiah(net_foreign), power_info, delta_color="normal" if net_foreign > 0 else "inverse")
+            c3.metric(f"Asing ({'🟢 AKUMULASI' if net_foreign > 0 else '🔴 DISTRIBUSI'})", format_rupiah(net_foreign), f"Dominasi: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}", delta_color="normal" if net_foreign > 0 else "inverse")
         else:
-            c3.metric("Foreign Flow (Asing)", "Dinonaktifkan", "Dialihkan ke Mode Yahoo Finance", delta_color="off")
+            c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Yahoo Finance Mode / Kuota Habis", delta_color="off")
         
         is_outperform = "🌟 Outperform IHSG" in " ".join(reasons)
-        rrg_status = "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM"
         eps_g = fund.get('EPS_Growth') if fund else None
-        laba_str = f"Laba: +{eps_g*100:.1f}% 🚀" if eps_g and eps_g > 0 else (f"Laba: {eps_g*100:.1f}% 🔻" if eps_g else "Laba: N/A")
+        c4.metric("Status vs Pasar (RRG)", "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM", f"Laba: +{eps_g*100:.1f}%" if eps_g and eps_g > 0 else "Laba: N/A", delta_color="normal" if is_outperform else "off")
         
-        c4.metric("Status vs Pasar (RRG)", rrg_status, laba_str, delta_color="normal" if is_outperform else "off")
-        
-        if "BULLISH DIV" in divergence:
-            st.success(f"🚨 **DIVERGENCE ALERT:** {divergence} - Peluang besar harga akan segera rebound!")
-        elif "BEARISH DIV" in divergence:
-            st.error(f"🚨 **DIVERGENCE ALERT:** {divergence} - Hati-hati, indikator distribusi di pucuk!")
-        
-        st.subheader(f"Visualisasi Grafik {ticker_only} & Titik Krusial")
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05, subplot_titles=("Harga, MA Pelangi, & Target", "Volume", "Bandar Flow (CMF)"))
-        
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
-        
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.5), name='MA20'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue', width=1.5), name='MA50'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA100'], line=dict(color='green', width=2), name='MA100'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA200'], line=dict(color='purple', width=2.5), name='EMA200'), row=1, col=1)
+        st.subheader(f"Visualisasi Grafik {ticker_only}")
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05)
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA100'], line=dict(color='green')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA200'], line=dict(color='purple')), row=1, col=1)
         
         if atr > 0:
-            fig.add_hline(y=target_profit, line_dash="dash", line_color="green", annotation_text=f"Target: Rp {int(target_profit):,}", row=1, col=1)
-            fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", annotation_text=f"Stop Loss: Rp {int(stop_loss):,}", row=1, col=1)
-        if use_idx_data and avg_buy_price > 0:
-            fig.add_hline(y=avg_buy_price, line_dash="dot", line_color="blue", annotation_text=f"Modal Asing: Rp {int(avg_buy_price):,}", row=1, col=1)
-        
-        _, patterns = check_candlestick_patterns(df.iloc[-1], df.iloc[-2])
-        if patterns: fig.add_annotation(x=df.index[-1], y=df['High'].iloc[-1], text=patterns[0], showarrow=True, arrowhead=1, row=1, col=1)
-        
+            fig.add_hline(y=target_profit, line_dash="dash", line_color="green", row=1, col=1)
+            fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", row=1, col=1)
+        if net_foreign is not None and avg_buy_price > 0:
+            fig.add_hline(y=avg_buy_price, line_dash="dot", line_color="blue", row=1, col=1)
+            
         colors_vol = ['red' if r['Open'] - r['Close'] >= 0 else 'green' for i, r in df.iterrows()]
-        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors_vol, name='Volume'), row=2, col=1)
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors_vol), row=2, col=1)
         
         cmf_colors = ['green' if v >= 0 else 'red' for v in df['CMF']]
-        fig.add_trace(go.Bar(x=df.index, y=df['CMF'], marker_color=cmf_colors, name='Money Flow'), row=3, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="black", row=3, col=1)
-        
+        fig.add_trace(go.Bar(x=df.index, y=df['CMF'], marker_color=cmf_colors), row=3, col=1)
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 12. PENGATURAN SIDEBAR & AKUN ---
-st.sidebar.header("⚙️ Pengaturan Menu")
-mode = st.sidebar.radio("Pilih Menu Utama:", ["🔍 Super Screener", "📊 Advanced Chart"])
+# --- 12. PENGATURAN SIDEBAR ---
+st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
+st.sidebar.caption(f"Status Akun: **{user_role.upper()}**")
+
+# Cek Sisa Kuota Realtime dari DB
+try:
+    current_db = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).execute().data[0]
+    st.sidebar.caption(f"Sisa Kuota API: **{current_db['daily_quota'] - current_db['used_quota']} / {current_db['daily_quota']}**")
+except: pass
+
+st.sidebar.divider()
+mode = st.sidebar.radio("Pilih Menu:", ["🔍 Super Screener", "📊 Advanced Chart"])
 st.sidebar.divider()
 
-st.sidebar.markdown("**⚙️ Sumber Data Bandar**")
-data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Yahoo Finance (Gratis/Estimasi)", "🏦 Data IDX (Akurat/Premium)"])
-use_idx_data = "Data IDX" in data_source
+if user_role == 'free':
+    st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Yahoo Finance). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).")
+    use_idx_data = False
+else:
+    data_source = st.sidebar.radio("Sumber Data:", ["🌐 Yahoo Finance (Gratis)", "🏦 Data IDX (Potong Kuota)"])
+    use_idx_data = "Data IDX" in data_source
 
 st.sidebar.divider()
 
 if mode == "🔍 Super Screener":
-    st.sidebar.markdown("**📂 Pilih Kolam Saham**")
     kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
-    
     if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
-        st.sidebar.info("⚡ Mode Lapis 2 mematikan koneksi API secara otomatis untuk menghemat limit. 100% menggunakan Yahoo Finance.")
         use_idx_data = False
-        active_stock_list = SHARIA_MIDCAP_STOCKS
-        active_category_name = "Lapis 2 (Mid-Small Caps)"
+        active_stock_list, active_category_name = SHARIA_MIDCAP_STOCKS, "Lapis 2"
     else:
-        active_stock_list = SHARIA_STOCKS
-        active_category_name = "Lapis 1 (JII30)"
+        active_stock_list, active_category_name = SHARIA_STOCKS, "Lapis 1 (JII30)"
 else:
-    active_stock_list = SHARIA_STOCKS
-    active_category_name = "Advanced Chart"
+    active_stock_list, active_category_name = SHARIA_STOCKS, "Advanced Chart"
 
 st.sidebar.divider()
 
-# --- MENU KHUSUS ADMIN PANEL ---
 if is_admin:
     st.sidebar.markdown("👑 **Admin Panel**")
-    if st.sidebar.button("🧹 Bersihkan Memori (Refresh Data)"):
+    if st.sidebar.button("🧹 Bersihkan Memori"):
         st.cache_data.clear()
         api_registry.clear()
-        st.sidebar.success("✅ Memori berhasil dihapus!")
+        st.sidebar.success("✅ Memori dihapus!")
     st.sidebar.divider()
 
-st.sidebar.markdown(f"👤 Login sebagai: **{current_user}**")
 if st.sidebar.button("Keluar (Logout)"):
-    st.session_state["password_correct"] = False
+    st.session_state['logged_in'] = False
+    st.session_state['user'] = None
+    supabase.auth.sign_out()
     st.rerun()
 
 # --- MENJALANKAN APLIKASI ---
-if mode == "🔍 Super Screener": 
-    run_screener(use_idx_data, active_stock_list, active_category_name)
-else: 
-    show_chart(use_idx_data)
+if mode == "🔍 Super Screener": run_screener(use_idx_data, active_stock_list, active_category_name)
+else: show_chart(use_idx_data)
