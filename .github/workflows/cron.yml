@@ -23,10 +23,10 @@ jobs:
           python-version: '3.10'
 
       - name: Install Dependencies
-        # Bypass PyPI: Mengambil pandas-ta langsung dari Source Code aslinya
+        # Bypass Total: Install pandas-ta langsung dari file arsip web resminya!
         run: |
           pip install "numpy<2.0.0" "pandas<3.0.0" yfinance requests supabase
-          pip install git+https://github.com/twopirllc/pandas-ta.git@main
+          pip install https://www.pandas-ta.dev/assets/zip/pandas_ta-0.4.25b0.tar.gz
 
       - name: Run Fetcher Script
         env:
