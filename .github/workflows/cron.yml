@@ -20,12 +20,13 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Install Dependencies
-        # Strategi Kunci Mati: Memaksa kombinasi versi yang 100% stabil
+        # Bypass PyPI: Mengambil pandas-ta langsung dari Source Code aslinya
         run: |
-          pip install numpy==1.26.4 pandas==2.1.4 pandas-ta==0.3.14b0 yfinance requests supabase
+          pip install "numpy<2.0.0" "pandas<3.0.0" yfinance requests supabase
+          pip install git+https://github.com/twopirllc/pandas-ta.git@main
 
       - name: Run Fetcher Script
         env:
