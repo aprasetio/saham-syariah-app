@@ -15,7 +15,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
 
-# --- 2. FUNGSI TEKNIKAL & PENDETEKSI HARI LIBUR ---
+# --- 2. FUNGSI TEKNIKAL ---
 def check_candlestick_patterns(curr, prev):
     score = 0; patterns = []
     try:
@@ -42,14 +42,9 @@ def get_ihsg_data():
         return ihsg[['Close']].rename(columns={'Close': 'IHSG_Close'})
     except: return pd.DataFrame()
 
-# 🧠 OTAK BARU: Pendeteksi Tanggal Bursa Terakhir yang Valid
+# 🧠 OTAK BARU: Ambil tanggal terakhir SELELAAH Ghost Row dibuang
 def get_idx_target_date(df):
-    wib_time = datetime.utcnow() + timedelta(hours=7)
-    latest_yf_date = df.index[-1].date()
-    if latest_yf_date == wib_time.date() and wib_time.hour < 18:
-        return df.index[-2].strftime('%Y-%m-%d') if len(df) > 1 else df.index[-1].strftime('%Y-%m-%d')
-    else:
-        return df.index[-1].strftime('%Y-%m-%d')
+    return df.index[-1].strftime('%Y-%m-%d')
 
 # --- 3. PROSES UTAMA SCREENING ---
 print(f"[{datetime.utcnow()}] 🚀 Memulai Auto-Screening JII30...")
@@ -66,9 +61,15 @@ for t in tickers:
         df.columns = [str(c).capitalize() for c in df.columns]
         df = df.loc[:, ~df.columns.duplicated()]
         
-        if df.empty or len(df) < 50 or df['Volume'].iloc[-1] < 5000000: continue
+        # 🧹 ANTI-GHOST ROW: Tendang baris hari libur yang dipaksakan YFinance!
+        df = df[df['Volume'] > 0]
         
-        # 🎯 Menentukan Tanggal Anti-Libur untuk API GOAPI
+        if df.empty or len(df) < 50: continue
+        
+        if df['Volume'].iloc[-1] < 5000000:
+            print(f"⏩ SKIP {t}: Volume transaksi terlalu kecil")
+            continue
+            
         target_date = get_idx_target_date(df)
         
         df['Rsi'] = df.ta.rsi(length=14)
@@ -105,9 +106,11 @@ for t in tickers:
         if score >= 4 or "Accumulation" in wyckoff: rec = "✅ BUY"
         if score >= 6: rec = "💎 STRONG BUY"
         
-        if score < 3 and "Accumulation" not in wyckoff: continue 
+        if score < 3 and "Accumulation" not in wyckoff:
+            print(f"⏩ SKIP {t}: Skor teknikal jelek ({score})")
+            continue 
 
-        # 4. TARIK DATA ASING DENGAN TANGGAL ANTI-LIBUR
+        # 4. TARIK DATA ASING
         symbol = t.replace(".JK", "")
         net_foreign, avg_buy_price, power_pct = 0, 0, 0
         
@@ -122,7 +125,9 @@ for t in tickers:
             if buy_lot > 0: avg_buy_price = buy_val / (buy_lot * 100)
             if (close * volume) > 0: power_pct = (abs(net_foreign) / (close * volume)) * 100
 
-        if net_foreign <= 0: continue 
+        if net_foreign <= 0:
+            print(f"⏩ SKIP {t}: Asing jualan / distribusi (Rp {net_foreign})")
+            continue 
 
         target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
         stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
@@ -139,13 +144,12 @@ for t in tickers:
             "status": rec,
             "katalis": ", ".join(reasons)
         })
-        print(f"✅ Lolos: {symbol} (Tgl: {target_date})")
+        print(f"✅ LOLOS: {symbol} (Tgl: {target_date})")
     except Exception as e:
         print(f"❌ Error {t}: {e}")
 
 # --- 5. SIMPAN KE SUPABASE ---
 if results:
-    # Hapus data sebelumnya di tanggal yang sama (mencegah duplikat)
     unique_dates = list(set([r['fetch_date'] for r in results]))
     for d in unique_dates:
         supabase.table('jii30_daily_data').delete().eq('fetch_date', d).execute()
