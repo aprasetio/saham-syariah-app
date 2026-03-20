@@ -265,9 +265,9 @@ def run_screener(use_idx_data, stock_list, category_name):
     if st.button("MULAI SCANNING"):
         
         # ==========================================================
-        # JALUR 1: JII30 (BACA INSTAN DARI SUPABASE SERVER - 0 API HIT)
+        # JALUR 1: JII30 + DATA IDX (BACA INSTAN DARI SUPABASE SERVER)
         # ==========================================================
-        if category_name == "Lapis 1 (JII30)":
+        if category_name == "Lapis 1 (JII30)" and use_idx_data:
             with st.spinner("⚡ Menyedot data matang dari Server..."):
                 res = supabase.table('jii30_daily_data').select('*').execute()
                 if res.data:
@@ -304,10 +304,10 @@ def run_screener(use_idx_data, stock_list, category_name):
 
                     st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
                 else:
-                    st.warning("Data server masih kosong hari ini.")
+                    st.warning("⚠️ Data server IDX masih kosong hari ini (Mungkin bursa libur atau tidak ada saham yang lolos filter bandar). Silakan gunakan mode Yahoo Finance.")
 
         # ==========================================================
-        # JALUR 2: LAPIS 2 (SCANNING LIVE VIA YFINANCE - TANPA GOAPI)
+        # JALUR 2: SCANNING LIVE YFINANCE (Untuk Lapis 2 ATAU Lapis 1 Mode Gratis)
         # ==========================================================
         else:
             progress = st.progress(0)
@@ -326,7 +326,11 @@ def run_screener(use_idx_data, stock_list, category_name):
                     df = price_data[t].copy()
                     df = fix_dataframe(df)
                     df = df[df['Volume'] > 0] # Anti Ghost Row
-                    if df.empty or len(df) < 50 or df['Volume'].iloc[-1] < 2000000: continue
+                    if df.empty or len(df) < 50: continue
+                    
+                    # Batas volume: Lapis 1 = 5jt, Lapis 2 = 2jt
+                    min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
+                    if df['Volume'].iloc[-1] < min_vol: continue
                     
                     df = calculate_metrics(df, ihsg_df)
                     fund = get_fundamental_info(t)
@@ -355,8 +359,8 @@ def run_screener(use_idx_data, stock_list, category_name):
             
             if results:
                 df_res = pd.DataFrame(results)
-                st.success(f"Selesai! {len(results)} Saham Lapis 2 Ditemukan.")
-                st.caption("🌐 **Sumber:** Yahoo Finance (Data Asing Dinonaktifkan untuk Lapis 2)")
+                st.success(f"Selesai! {len(results)} Saham {category_name} Ditemukan.")
+                st.caption("🌐 **Sumber:** Yahoo Finance (Data Asing Dinonaktifkan)")
                 
                 st.dataframe(df_res, use_container_width=True, hide_index=True,
                     column_config={
@@ -369,7 +373,7 @@ def run_screener(use_idx_data, stock_list, category_name):
                         "Katalis": st.column_config.TextColumn(width="medium")
                     }
                 )
-            else: st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
+            else: st.warning("Data kosong / Tidak ada saham yang lolos kriteria teknikal hari ini.")
 
 # --- 11. FITUR CHART DETAIL ---
 def show_chart(use_idx_data):
