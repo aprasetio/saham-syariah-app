@@ -48,23 +48,29 @@ if not check_password():
     st.stop()
 
 # --- 3. AMBIL DATA RAHASIA & STATUS ADMIN ---
-GOAPI_KEY = st.secrets["GOAPI_KEY"]
+# Tetap membaca "GOAPI_KEY" dari secrets.toml lama Anda agar tidak error
+IDX_API_KEY = st.secrets.get("IDX_API_KEY", st.secrets.get("GOAPI_KEY", ""))
 admin_list = st.secrets.get("ADMIN_USERS", ADMIN_USERS)
 
 current_user = st.session_state.get('username', '')
 is_admin = current_user in admin_list
 
 # --- 4. BUKU TAMU GLOBAL (SHARED CACHE REGISTRY) ---
-# Menyimpan riwayat saham apa saja yang sudah ditarik API-nya hari ini
 @st.cache_resource
 def get_api_registry():
     return set()
 
 api_registry = get_api_registry()
 
-# --- 5. CSS FIX ---
+# --- 5. CSS FIX & JUBAH GAIB STREAMLIT ---
 st.markdown("""
 <style>
+    /* Menyembunyikan Menu Streamlit dan Footer (Jubah Gaib) */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+
+    /* Styling Visual Metric */
     [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
     [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; white-space: normal !important; }
     [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; white-space: normal !important; line-height: 1.2 !important; }
@@ -106,7 +112,7 @@ def format_rupiah(angka):
     else: formatted = f"Rp {angka:,.0f}"
     return f"-{formatted}" if is_negative else formatted
 
-def get_goapi_target_date(df):
+def get_idx_target_date(df):
     wib_time = datetime.utcnow() + timedelta(hours=7)
     latest_yf_date = df.index[-1].date()
     if latest_yf_date == wib_time.date() and wib_time.hour < 18:
@@ -114,7 +120,7 @@ def get_goapi_target_date(df):
     else:
         return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 8. FUNGSI FETCH IHSG & FUNDAMENTAL & GOAPI ---
+# --- 8. FUNGSI FETCH IHSG & FUNDAMENTAL & DATA IDX ---
 @st.cache_data(ttl=3600)
 def get_ihsg_data():
     try:
@@ -125,10 +131,10 @@ def get_ihsg_data():
         return pd.DataFrame()
 
 @st.cache_data(ttl=43200)
-def fetch_goapi_foreign_flow(symbol, target_date):
+def fetch_idx_foreign_flow(symbol, target_date):
     headers = {
         'accept': 'application/json', 
-        'X-API-KEY': GOAPI_KEY,
+        'X-API-KEY': IDX_API_KEY,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     net_foreign, avg_buy_price = 0, 0
@@ -139,7 +145,7 @@ def fetch_goapi_foreign_flow(symbol, target_date):
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers=headers, timeout=10)
         if res_broker.status_code != 200:
-            st.sidebar.error(f"🚨 GOAPI Error {symbol}: {res_broker.status_code}")
+            st.sidebar.error(f"🚨 Data IDX Error {symbol}: {res_broker.status_code}")
             return None, 0, None
         
         res_broker_json = res_broker.json()
@@ -157,7 +163,7 @@ def fetch_goapi_foreign_flow(symbol, target_date):
             if total_buy_lot > 0:
                 avg_buy_price = total_buy_val / (total_buy_lot * 100)
     except Exception as e: 
-        st.sidebar.error(f"🔌 Koneksi GOAPI Terputus: {e}")
+        st.sidebar.error(f"🔌 Koneksi API Terputus: {e}")
         return None, 0, None
         
     return net_foreign, avg_buy_price, fetch_time
@@ -294,10 +300,10 @@ def score_analysis(df, fund_data):
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
 # --- 10. FITUR SCREENER ---
-def run_screener(use_goapi, stock_list, category_name):
+def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
-    if use_goapi: 
-        st.success("🏦 Mode GOAPI: Memfilter Foreign Flow & Harga Modal Bandar aktif.")
+    if use_idx_data: 
+        st.success("🏦 Mode Data IDX: Memfilter Foreign Flow & Harga Modal Bandar aktif.")
     else: 
         st.info("🌐 Mode Yahoo Finance: Scanning Cepat Unlimited (Fokus Pergerakan Bandar Lokal & Teknikal).")
     
@@ -312,7 +318,7 @@ def run_screener(use_goapi, stock_list, category_name):
         
         price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
         
-        last_sync_time, last_bursa_date, goapi_date_used = None, None, None
+        last_sync_time, last_bursa_date, idx_date_used = None, None, None
         
         for i, t in enumerate(tickers):
             status.text(f"Menganalisa Saham: {t} ...")
@@ -354,18 +360,17 @@ def run_screener(use_goapi, stock_list, category_name):
                 symbol_only = t.replace(".JK", "")
                 net_foreign, avg_buy_price, power_pct = None, 0, 0
                 
-                goapi_date = get_goapi_target_date(df)
-                goapi_date_used = goapi_date
+                idx_date = get_idx_target_date(df)
+                idx_date_used = idx_date
                 last_bursa_date = df.index[-1].strftime('%d %b %Y') 
                 
-                if use_goapi:
-                    status.text(f"Menarik Data GOAPI: {t} ...")
+                if use_idx_data:
+                    status.text(f"Menarik Data IDX: {t} ...")
                     time.sleep(1) 
-                    net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(symbol_only, goapi_date)
+                    net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(symbol_only, idx_date)
                     if fetch_time: last_sync_time = fetch_time 
                     
-                    # Mencatat keberhasilan ke Buku Tamu Global
-                    api_registry.add(f"{symbol_only}_{goapi_date}")
+                    api_registry.add(f"{symbol_only}_{idx_date}")
                     
                     if net_foreign is not None and net_foreign <= 0: continue
                 
@@ -377,15 +382,19 @@ def run_screener(use_goapi, stock_list, category_name):
 
                 status_ihsg = "✅ Outperform" if "🌟 Outperform IHSG" in reasons else "❌ Underperform"
 
+                # PERBAIKAN UI/UX TABEL: 
+                # Menggunakan \n (Baris Baru) agar tulisan turun ke bawah dan tidak memanjang ke samping
+                formatted_reasons = "\n".join([f"• {r.strip()}" for r in reasons])
+
                 results.append({
                     "Kode": symbol_only,
                     "Harga": int(close),
-                    "Area TP / SL": f"Rp {int(target_profit):,} / Rp {int(stop_loss):,}",
+                    "Target / SL": f"TP: Rp {int(target_profit):,}\nSL: Rp {int(stop_loss):,}",
                     "Wyckoff": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
-                    "RRG vs IHSG": status_ihsg,
-                    "Dominasi Asing": f"{power_pct:.1f}%" if use_goapi and net_foreign is not None else "-",
-                    "Rek": rec,
-                    "Alasan Utama": " | ".join(reasons)
+                    "Vs IHSG": status_ihsg,
+                    "Dominasi Asing": f"{power_pct:.1f}%" if use_idx_data and net_foreign is not None else "-",
+                    "Rekomendasi": rec,
+                    "Poin Analisa (Alasan)": formatted_reasons
                 })
             except Exception as loop_e: 
                 continue
@@ -396,16 +405,18 @@ def run_screener(use_goapi, stock_list, category_name):
         if results:
             df_res = pd.DataFrame(results)
             st.success(f"Selesai! {len(results)} Saham Terbaik Ditemukan.")
-            if use_goapi and last_sync_time:
-                st.caption(f"📅 **Data Harga Per:** {last_bursa_date} | 🔄 **Data Asing Diambil Tgl:** {goapi_date_used} (Sync: {last_sync_time})")
+            if use_idx_data and last_sync_time:
+                st.caption(f"📅 **Data Harga Per:** {last_bursa_date} | 🔄 **Data Asing Diambil Tgl:** {idx_date_used} (Sync: {last_sync_time})")
             elif last_bursa_date:
                 st.caption(f"📅 **Data Bursa Per:** {last_bursa_date} | 🌐 **Sumber Bandar:** Yahoo Finance")
-            st.dataframe(df_res, use_container_width=True)
+            
+            # Konfigurasi Dataframe agar mendukung multilines (Baris Baru) secara sempurna di Streamlit
+            st.dataframe(df_res, use_container_width=True, hide_index=True)
         else:
             st.warning("Data kosong / Tidak ada saham yang lolos kriteria.")
 
 # --- 11. FITUR CHART DETAIL ---
-def show_chart(use_goapi):
+def show_chart(use_idx_data):
     st.header("📊 Deep Analysis & Target Tracker")
     
     with st.form(key='chart_search_form'):
@@ -433,26 +444,25 @@ def show_chart(use_goapi):
         
         net_foreign, avg_buy_price, fetch_time = None, 0, None
         
-        goapi_date = get_goapi_target_date(df)
+        idx_date = get_idx_target_date(df)
         last_date_disp = df.index[-1].strftime('%d %b %Y')
         
         # --- PERLINDUNGAN KUOTA (SMART WHITELIST) ---
-        cache_key = f"{ticker_only}_{goapi_date}"
-        if use_goapi and not is_admin:
+        cache_key = f"{ticker_only}_{idx_date}"
+        if use_idx_data and not is_admin:
             if cache_key not in api_registry:
                 st.info(f"ℹ️ **Info:** Saham {ticker_only} belum terdapat di dalam data Smart Screener hari ini. Aplikasi otomatis menggunakan data Yahoo Finance.")
-                use_goapi = False # Paksa matikan GOAPI agar tidak memakan limit baru
+                use_idx_data = False # Paksa matikan API agar tidak memakan limit baru
         
-        if use_goapi:
-            net_foreign, avg_buy_price, fetch_time = fetch_goapi_foreign_flow(ticker_only, goapi_date)
-            # Jika admin yang menarik data baru, catat di buku tamu agar user lain bisa melihatnya nanti
+        if use_idx_data:
+            net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(ticker_only, idx_date)
             if is_admin:
                 api_registry.add(cache_key)
             
         st.divider()
         
-        if use_goapi and fetch_time:
-            st.caption(f"📅 **Harga Per:** {last_date_disp} | 🔄 **Asing Diambil Tgl:** {goapi_date} (Sync: {fetch_time})")
+        if use_idx_data and fetch_time:
+            st.caption(f"📅 **Harga Per:** {last_date_disp} | 🔄 **Asing Diambil Tgl:** {idx_date} (Sync: {fetch_time})")
         else:
             st.caption(f"📅 **Data Bursa Per:** {last_date_disp} | 🌐 **Sumber Bandar:** Yahoo Finance (Estimasi / Tanpa Asing)")
         
@@ -506,7 +516,7 @@ def show_chart(use_goapi):
         if atr > 0:
             fig.add_hline(y=target_profit, line_dash="dash", line_color="green", annotation_text=f"Target: Rp {int(target_profit):,}", row=1, col=1)
             fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", annotation_text=f"Stop Loss: Rp {int(stop_loss):,}", row=1, col=1)
-        if use_goapi and avg_buy_price > 0:
+        if use_idx_data and avg_buy_price > 0:
             fig.add_hline(y=avg_buy_price, line_dash="dot", line_color="blue", annotation_text=f"Modal Asing: Rp {int(avg_buy_price):,}", row=1, col=1)
         
         _, patterns = check_candlestick_patterns(df.iloc[-1], df.iloc[-2])
@@ -528,8 +538,8 @@ mode = st.sidebar.radio("Pilih Menu Utama:", ["🔍 Super Screener", "📊 Advan
 st.sidebar.divider()
 
 st.sidebar.markdown("**⚙️ Sumber Data Bandar**")
-data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Yahoo Finance (Gratis/Estimasi)", "🏦 GOAPI (Akurat/Limit Harian)"])
-use_goapi = "GOAPI" in data_source
+data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Yahoo Finance (Gratis/Estimasi)", "🏦 Data IDX (Akurat/Premium)"])
+use_idx_data = "Data IDX" in data_source
 
 st.sidebar.divider()
 
@@ -538,8 +548,8 @@ if mode == "🔍 Super Screener":
     kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
     
     if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
-        st.sidebar.info("⚡ Mode Lapis 2 mematikan GOAPI secara otomatis untuk menghemat limit. 100% menggunakan Yahoo Finance.")
-        use_goapi = False
+        st.sidebar.info("⚡ Mode Lapis 2 menggunakan 100% Yahoo Finance secara otomatis.")
+        use_idx_data = False
         active_stock_list = SHARIA_MIDCAP_STOCKS
         active_category_name = "Lapis 2 (Mid-Small Caps)"
     else:
@@ -556,7 +566,7 @@ if is_admin:
     st.sidebar.markdown("👑 **Admin Panel**")
     if st.sidebar.button("🧹 Bersihkan Memori (Refresh Data)"):
         st.cache_data.clear()
-        api_registry.clear() # HAPUS JUGA BUKU TAMU SAAT ADMIN KLIK BERSIHKAN!
+        api_registry.clear()
         st.sidebar.success("✅ Memori berhasil dihapus!")
     st.sidebar.divider()
 
@@ -567,6 +577,6 @@ if st.sidebar.button("Keluar (Logout)"):
 
 # --- MENJALANKAN APLIKASI ---
 if mode == "🔍 Super Screener": 
-    run_screener(use_goapi, active_stock_list, active_category_name)
+    run_screener(use_idx_data, active_stock_list, active_category_name)
 else: 
-    show_chart(use_goapi)
+    show_chart(use_idx_data)
