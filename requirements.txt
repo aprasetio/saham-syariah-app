@@ -3,6 +3,5 @@ pandas
 pandas-ta
 plotly
 requests
-supabase==2.3.4
-websockets>=13.0
-yfinance>=0.2.40
+supabase
+yfinance
