@@ -4,7 +4,11 @@ on:
   schedule:
     # Berjalan jam 19:00 WIB (12:00 UTC) Setiap Senin - Jumat
     - cron: '0 12 * * 1-5'
-  workflow_dispatch: # Memungkinkan tombol "Run Manual" di GitHub
+  workflow_dispatch:
+
+# Menyembunyikan peringatan (warning) Node.js dari GitHub
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   run-screener:
@@ -19,8 +23,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
+        # Mengunci Pandas dan Numpy di versi stabil agar pandas-ta bisa ter-install
         run: |
-          pip install pandas yfinance pandas-ta requests supabase
+          pip install "numpy<2.0.0" "pandas<3.0.0" yfinance pandas-ta requests supabase
 
       - name: Run Fetcher Script
         env:
