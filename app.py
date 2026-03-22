@@ -97,7 +97,7 @@ def login_ui():
                         st.session_state['user'] = profile.data[0]
                         st.session_state['logged_in'] = True
                         
-                        # Merekam Audit Log 
+                        # Merekam Audit Log (Dilengkapi pelaporan Error)
                         try:
                             supabase.table('audit_logs').insert({
                                 "user_email": email,
@@ -124,17 +124,14 @@ user_email = user_data['email']
 is_admin = (user_role == 'admin')
 
 # --- 5. AUTO-RESET & LOGIKA KUOTA API ---
-# 5A. Eksekusi Instan: Reset otomatis jika hari berganti (Zona Waktu WIB)
 try:
     wib_today = (datetime.utcnow() + timedelta(hours=7)).strftime('%Y-%m-%d')
     user_profile = supabase.table('profiles').select('daily_quota, used_quota, last_reset_date').eq('id', user_id).execute().data[0]
     
     if user_profile.get('last_reset_date') != wib_today:
         supabase.table('profiles').update({'used_quota': 0, 'last_reset_date': wib_today}).eq('id', user_id).execute()
-except Exception as e: 
-    pass
+except Exception as e: pass
 
-# 5B. Pemotongan Kuota saat Cari Saham
 def check_and_deduct_quota(cache_key):
     if cache_key in api_registry or is_admin: return True
     try:
@@ -145,19 +142,33 @@ def check_and_deduct_quota(cache_key):
         return False
     except Exception as e: return False
 
-# --- 6. CSS FIX ---
+# --- 6. CSS FIX (Pembenahan Teks Terpotong di Metrik) ---
 st.markdown("""
 <style>
     .stAppDeployButton {display:none;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    [data-testid="stMetric"] { background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; padding: 15px !important; border-radius: 10px !important; height: 100% !important; }
-    [data-testid="stMetricLabel"] p { color: #31333F !important; font-weight: bold !important; font-size: 1rem !important; }
-    [data-testid="stMetricValue"] div { color: #000000 !important; font-size: 1.25rem !important; }
+    /* Memaksa teks di kotak metrik agar turun ke bawah (Wrap) dan tidak terpotong (...) */
+    [data-testid="stMetric"] { 
+        background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; 
+        padding: 15px !important; border-radius: 10px !important; height: 100% !important; 
+        white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
+    }
+    [data-testid="stMetricLabel"] p { 
+        color: #31333F !important; font-weight: bold !important; font-size: 0.95rem !important; 
+        white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
+    }
+    [data-testid="stMetricValue"] div { 
+        color: #000000 !important; font-size: 1.2rem !important; 
+        white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
+    }
+    [data-testid="stMetricDelta"] div {
+        white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 7. DAFTAR SAHAM ---
+# --- 7. DAFTAR SAHAM (Lapis 1 & 2) ---
 SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
 SHARIA_MIDCAP_STOCKS = ["BRMS", "ELSA", "ENRG", "PTRO", "SIDO", "MYOR", "ESSA", "CTRA", "BSDE", "SMRA", "PWON", "ARTO", "BTPS", "MIKA", "HEAL", "SILO", "MAPA", "AUTO", "SMSM", "TAPG", "DSNG", "LSIP", "AALI", "WIKA", "PTPP", "TOTL", "NRCA", "SCMA", "MNCN", "ERAA"]
 IDX_API_KEY = st.secrets.get("IDX_API_KEY", "")
@@ -309,8 +320,9 @@ def score_analysis(df, fund_data):
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     
-    with st.expander("📖 Panduan Membaca Hasil Screener (Klik untuk membuka)"):
+    with st.expander("📖 Kamus Pintar & Panduan Aplikasi (Klik untuk membuka)"):
         st.info("💡 **Tips:** Kombinasi Katalis yang banyak (contoh: 🔥🌟🐳) menandakan probabilitas kenaikan harga yang lebih tinggi.")
+        
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("""
@@ -324,16 +336,23 @@ def run_screener(use_idx_data, stock_list, category_name):
             **📊 Status Rekomendasi:**
             * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna (Uptrend kuat + Akumulasi).
             * ✅ **BUY** : Saham mulai menunjukkan tanda kebangkitan / pantulan.
+            
+            **🎯 Rahasia Perhitungan Target (TP) & Batas Rugi (SL):**
+            Aplikasi ini **TIDAK** menggunakan tebak-tebakan Support/Resistance tradisional. Kami menggunakan teknologi **ATR (Average True Range)** yang mengukur keliaran (volatilitas) saham. Jika saham sedang bergerak liar, jarak SL/TP otomatis melebar agar Anda tidak tersapu goyangan sesaat (*whipsaw*). Sistem mengunci Rasio Risiko ideal 1:2 (Merisikokan Rp 1.000 untuk potensi untung Rp 2.000).
             """)
         with c2:
             st.markdown("""
             **🔖 Arti Simbol Katalis (Pemicu Kenaikan):**
-            * 🔥 **MA (Moving Average)** : Harga sedang Uptrend (berada di atas garis rata-rata). Tren sedang memihak Anda.
-            * 🌟 **IHSG (Outperform)** : Saham ini berlari lebih kencang daripada IHSG. Jika IHSG merah, saham ini punya potensi tetap hijau.
-            * 🐳 **CMF (Chaikin Money Flow)** : Radar mendeteksi adanya suntikan dana besar (Bandar/Institusi sedang menampung barang).
-            * 💎 **RSI (Oversold)** : Harga saham sudah jatuh terlalu dalam (Diskon/Murah) dan bersiap memantul naik (*Rebound*).
-            * 🚀 **EPS (Earning Per Share)** : Fundamental Kuat! Laba bersih perusahaan bertumbuh di atas 10%.
-            * 🕯️ **Pola (Candlestick)** : Muncul pola pantulan di grafik (seperti *Hammer* atau *Engulfing*).
+            * 🔥 **MA (Moving Average)** : Harga sedang Uptrend (di atas garis rata-rata).
+            * 🌟 **IHSG (Outperform)** : Saham ini berlari lebih kencang daripada IHSG.
+            * 🐳 **CMF (Chaikin Money Flow)** : Deteksi suntikan dana raksasa (Bandar Lokal/Asing masuk).
+            * 💎 **RSI (Oversold)** : Harga saham sudah jatuh terlalu dalam (Diskon/Murah).
+            * 🚀 **EPS (Earning Per Share)** : Laba bersih perusahaan bertumbuh di atas 10%.
+            * 🕯️ **Pola (Candlestick)** : Muncul pola pantulan di grafik (*Hammer* / *Engulfing*).
+            
+            **🏢 Kategori Saham:**
+            * 👑 **Lapis 1 (JII30)**: Saham *Bluechip* besar & stabil (ADRO, AKRA, ANTM, BRIS, BRPT, CPIN, EXCL, HRUM, ICBP, INCO, INDF, INKP, INTP, ITMG, KLBF, MAPI, MBMA, MDKA, MEDC, PGAS, PGEO, PTBA, SMGR, TLKM, UNTR, UNVR, ACES, AMRT, ASII, TPIA).
+            * 🚀 **Lapis 2 (Mid-Caps)**: Saham gesit berpotensi *gain* tinggi (BRMS, ELSA, ENRG, PTRO, SIDO, MYOR, ESSA, CTRA, BSDE, SMRA, PWON, ARTO, BTPS, MIKA, HEAL, SILO, MAPA, AUTO, SMSM, TAPG, DSNG, LSIP, AALI, WIKA, PTPP, TOTL, NRCA, SCMA, MNCN, ERAA).
             """)
 
     if st.button("MULAI SCANNING"):
@@ -458,7 +477,7 @@ def show_chart(use_idx_data):
         3. 🔴 **Distribution (Distribusi):** Harga tertahan di pucuk atas. Bandar mulai diam-diam menjual/membuang barangnya ke ritel yang FOMO (takut ketinggalan). *(Waspada, siap-siap Take Profit)*.
         4. 🟠 **Markdown (Fase Turun):** Bandar sudah keluar, harga dibiarkan jatuh bebas (*Downtrend*). *(Hindari saham di fase ini)*.
 
-        **Penentuan Target:** Target Profit (TP) dan Stop Loss (SL) dihitung secara dinamis menggunakan indikator volatilitas (ATR). Artinya, jarak TP/SL akan melebar jika pergerakan saham sedang liar, dan menyempit jika saham sedang sepi.
+        **Penentuan Target (Sistem ATR):** Target Profit (TP) dan Stop Loss (SL) dihitung secara dinamis menggunakan indikator volatilitas (ATR). Artinya, jarak TP/SL akan melebar jika pergerakan saham sedang liar, dan menyempit jika saham sedang sepi. Hal ini mencegah Anda tersapu pergerakan harga palsu (*Stop Hunting*).
         """)
         
     if submit_search and ticker:
@@ -521,7 +540,17 @@ def show_chart(use_idx_data):
         c4.metric("Status vs Pasar (RRG)", "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM", f"Laba: +{eps_g*100:.1f}%" if eps_g and eps_g > 0 else "Laba: N/A", delta_color="normal" if is_outperform else "off")
         
         st.subheader(f"Visualisasi Grafik {ticker_only}")
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.05)
+        
+        # --- PENAMBAHAN JUDUL PADA SUBPLOT ---
+        fig = make_subplots(
+            rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.08,
+            subplot_titles=(
+                "1. Pergerakan Harga, Moving Average, & Garis Target (Candlestick)", 
+                "2. Volume Transaksi Harian", 
+                "3. Jejak Akumulasi Uang Raksasa (Chaikin Money Flow)"
+            )
+        )
+        
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange')), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue')), row=1, col=1)
@@ -539,7 +568,8 @@ def show_chart(use_idx_data):
         
         cmf_colors = ['green' if v >= 0 else 'red' for v in df['CMF']]
         fig.add_trace(go.Bar(x=df.index, y=df['CMF'], marker_color=cmf_colors), row=3, col=1)
-        fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
+        
+        fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=60, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
 # --- 12. FITUR ADMIN DASHBOARD (EKSKLUSIF) ---
@@ -577,7 +607,7 @@ def show_admin_dashboard():
                     st.info("Belum ada data log pencarian saham.")
 
 
-# --- 13. PENGATURAN SIDEBAR ---
+# --- 13. PENGATURAN SIDEBAR & SMART ROUTING LOGIC ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 st.sidebar.caption(f"Status Akun: **{user_role.upper()}**")
 
@@ -597,34 +627,50 @@ if is_admin:
 mode = st.sidebar.radio("Pilih Menu:", menu_options)
 st.sidebar.divider()
 
-if mode != "👑 Admin Dashboard":
+# Logika Smart UI Routing
+use_idx_data = False
+active_stock_list = SHARIA_STOCKS
+active_category_name = "Lapis 1 (JII30)"
+
+if mode == "🔍 Super Screener":
+    kategori_saham = st.sidebar.radio("Pilih Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
+    st.sidebar.divider()
+    
+    if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
+        active_stock_list = SHARIA_MIDCAP_STOCKS
+        active_category_name = "Lapis 2"
+        # Sembunyikan Opsi IDX, Paksa Pakai Data Standar
+        st.sidebar.info("✨ Mode Screener Lapis 2 secara otomatis menggunakan **Data Standar (0 Kuota)** agar tidak menghabiskan limit API Anda sekaligus.")
+        use_idx_data = False
+    else:
+        active_stock_list = SHARIA_STOCKS
+        active_category_name = "Lapis 1 (JII30)"
+        # Tampilkan Opsi Data
+        if user_role == 'free':
+            st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Data Standar). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).") 
+            use_idx_data = False
+        else:
+            data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Potong Kuota)"]) 
+            use_idx_data = "Data IDX" in data_source
+
+elif mode == "📊 Advanced Chart":
+    # Advanced Chart selalu memunculkan opsi sumber data untuk VIP/Pro
     if user_role == 'free':
         st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Data Standar). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).") 
         use_idx_data = False
     else:
-        data_source = st.sidebar.radio("Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Potong Kuota)"]) 
+        data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Potong Kuota)"]) 
         use_idx_data = "Data IDX" in data_source
-    st.sidebar.divider()
-
-    if mode == "🔍 Super Screener":
-        kategori_saham = st.sidebar.radio("Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
-        if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
-            use_idx_data = False
-            active_stock_list, active_category_name = SHARIA_MIDCAP_STOCKS, "Lapis 2"
-        else:
-            active_stock_list, active_category_name = SHARIA_STOCKS, "Lapis 1 (JII30)"
-    else:
-        active_stock_list, active_category_name = SHARIA_STOCKS, "Advanced Chart"
-    st.sidebar.divider()
 
 if is_admin:
+    st.sidebar.divider()
     st.sidebar.markdown("⚙️ **System Control**")
-    if st.sidebar.button("🧹 Bersihkan Memori Chache"):
+    if st.sidebar.button("🧹 Bersihkan Memori Cache"):
         st.cache_data.clear()
         api_registry.clear()
         st.sidebar.success("✅ Memori dibersihkan!")
-    st.sidebar.divider()
 
+st.sidebar.divider()
 if st.sidebar.button("Keluar (Logout)"):
     st.session_state['logged_in'] = False
     st.session_state['user'] = None
