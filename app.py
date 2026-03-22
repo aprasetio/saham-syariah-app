@@ -97,7 +97,6 @@ def login_ui():
                         st.session_state['user'] = profile.data[0]
                         st.session_state['logged_in'] = True
                         
-                        # Merekam Audit Log (Dilengkapi pelaporan Error)
                         try:
                             supabase.table('audit_logs').insert({
                                 "user_email": email,
@@ -142,13 +141,12 @@ def check_and_deduct_quota(cache_key):
         return False
     except Exception as e: return False
 
-# --- 6. CSS FIX (Pembenahan Teks Terpotong di Metrik) ---
+# --- 6. CSS FIX (Teks Box Metrik Tidak Terpotong) ---
 st.markdown("""
 <style>
     .stAppDeployButton {display:none;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    /* Memaksa teks di kotak metrik agar turun ke bawah (Wrap) dan tidak terpotong (...) */
     [data-testid="stMetric"] { 
         background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; 
         padding: 15px !important; border-radius: 10px !important; height: 100% !important; 
@@ -316,10 +314,11 @@ def score_analysis(df, fund_data):
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
-# --- 10. FITUR SCREENER ---
+# --- 10. FITUR SCREENER & KAMUS EDUKASI ---
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     
+    # KAMUS KOMPREHENSIF (Menjawab kebingungan user awam)
     with st.expander("📖 Kamus Pintar & Panduan Aplikasi (Klik untuk membuka)"):
         st.info("💡 **Tips:** Kombinasi Katalis yang banyak (contoh: 🔥🌟🐳) menandakan probabilitas kenaikan harga yang lebih tinggi.")
         
@@ -331,23 +330,23 @@ def run_screener(use_idx_data, stock_list, category_name):
             * **< 5% (Lemah)** : Asing tidak terlalu peduli. Harga digerakkan oleh ritel/bandar lokal.
             * **5% - 15% (Sedang)** : Mulai ada ketertarikan Asing (Akumulasi wajar).
             * **15% - 30% (Kuat)** : Asing bertindak sebagai *Market Maker* (Menyetir harga).
-            * **> 30% (Sangat Kuat)** : Saham sedang dikendalikan penuh/diborong brutal oleh Asing.
+            * **> 30% (Sangat Kuat)** : Saham dikendalikan penuh/diborong brutal oleh Asing.
             
             **📊 Status Rekomendasi:**
             * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna (Uptrend kuat + Akumulasi).
             * ✅ **BUY** : Saham mulai menunjukkan tanda kebangkitan / pantulan.
             
-            **🎯 Rahasia Perhitungan Target (TP) & Batas Rugi (SL):**
-            Aplikasi ini **TIDAK** menggunakan tebak-tebakan Support/Resistance tradisional. Kami menggunakan teknologi **ATR (Average True Range)** yang mengukur keliaran (volatilitas) saham. Jika saham sedang bergerak liar, jarak SL/TP otomatis melebar agar Anda tidak tersapu goyangan sesaat (*whipsaw*). Sistem mengunci Rasio Risiko ideal 1:2 (Merisikokan Rp 1.000 untuk potensi untung Rp 2.000).
+            **🎯 Rahasia Target Profit (TP) & Stop Loss (SL):**
+            Aplikasi ini **TIDAK** menggunakan tebak-tebakan Support/Resistance. Kami menggunakan teknologi **ATR (Average True Range)** yang mengukur keliaran saham. Jika saham bergerak liar, jarak SL/TP otomatis melebar agar Anda tidak tersapu pergerakan harga palsu (*whipsaw*). Kami mengunci Rasio Risiko 1:2 (Misal: Risiko rugi Rp 1.000 untuk potensi untung Rp 2.000).
             """)
         with c2:
             st.markdown("""
             **🔖 Arti Simbol Katalis (Pemicu Kenaikan):**
             * 🔥 **MA (Moving Average)** : Harga sedang Uptrend (di atas garis rata-rata).
             * 🌟 **IHSG (Outperform)** : Saham ini berlari lebih kencang daripada IHSG.
-            * 🐳 **CMF (Chaikin Money Flow)** : Deteksi suntikan dana raksasa (Bandar Lokal/Asing masuk).
+            * 🐳 **CMF (Chaikin Money Flow)** : Deteksi suntikan dana raksasa (Bandar masuk).
             * 💎 **RSI (Oversold)** : Harga saham sudah jatuh terlalu dalam (Diskon/Murah).
-            * 🚀 **EPS (Earning Per Share)** : Laba bersih perusahaan bertumbuh di atas 10%.
+            * 🚀 **EPS (Earning)** : Laba bersih perusahaan bertumbuh di atas 10%.
             * 🕯️ **Pola (Candlestick)** : Muncul pola pantulan di grafik (*Hammer* / *Engulfing*).
             
             **🏢 Kategori Saham:**
@@ -356,8 +355,7 @@ def run_screener(use_idx_data, stock_list, category_name):
             """)
 
     if st.button("MULAI SCANNING"):
-        
-        # JALUR 1: BACA INSTAN DARI SUPABASE
+        # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 + Data IDX)
         if category_name == "Lapis 1 (JII30)" and use_idx_data:
             with st.spinner("⚡ Menyedot data matang dari Server..."):
                 res = supabase.table('jii30_daily_data').select('*').execute()
@@ -391,9 +389,9 @@ def run_screener(use_idx_data, stock_list, category_name):
 
                     st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
                 else:
-                    st.warning("⚠️ Data server IDX masih kosong hari ini (Mungkin bursa libur atau tidak ada saham yang lolos filter bandar). Silakan gunakan mode Data Standar.")
+                    st.warning("⚠️ Data server IDX masih kosong hari ini. Silakan gunakan mode Data Standar.")
 
-        # JALUR 2: SCANNING LIVE (Data Standar)
+        # JALUR 2: SCANNING LIVE (Data Standar / Lapis 2)
         else:
             progress = st.progress(0)
             status = st.empty()
@@ -464,40 +462,35 @@ def show_chart(use_idx_data):
     st.header("📊 Deep Analysis & Target Tracker")
     with st.form(key='chart_search_form'):
         c_input, c_btn = st.columns([4, 1])
-        with c_input: ticker = st.text_input("Masukkan Kode Saham", "").upper()
+        with c_input: ticker = st.text_input("Masukkan Kode Saham (Contoh: BBCA, SIDO)", "").upper()
         with c_btn:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_search = st.form_submit_button("Cari Saham 🔍")
             
-    with st.expander("📖 Panduan Membaca Fase Wyckoff & Target Harga"):
+    with st.expander("📖 Panduan Membaca Fase Wyckoff & Grafik (Klik di sini)"):
         st.markdown("""
         **Siklus Pergerakan Harga Bandar (Wyckoff Phase):**
-        1. 🟢 **Accumulation (Akumulasi):** Harga sedang di bawah dan bergerak mendatar. Bandar sedang diam-diam mengumpulkan/membeli saham dari ritel yang panik. *(Fase terbaik untuk cicil beli)*.
-        2. 🔵 **Markup (Fase Naik):** Bandar mulai mengerek harga naik dengan cepat. Terjadi *Uptrend* yang kuat. *(Fase nikmat untuk Hold/Tahan untung)*.
-        3. 🔴 **Distribution (Distribusi):** Harga tertahan di pucuk atas. Bandar mulai diam-diam menjual/membuang barangnya ke ritel yang FOMO (takut ketinggalan). *(Waspada, siap-siap Take Profit)*.
-        4. 🟠 **Markdown (Fase Turun):** Bandar sudah keluar, harga dibiarkan jatuh bebas (*Downtrend*). *(Hindari saham di fase ini)*.
-
-        **Penentuan Target (Sistem ATR):** Target Profit (TP) dan Stop Loss (SL) dihitung secara dinamis menggunakan indikator volatilitas (ATR). Artinya, jarak TP/SL akan melebar jika pergerakan saham sedang liar, dan menyempit jika saham sedang sepi. Hal ini mencegah Anda tersapu pergerakan harga palsu (*Stop Hunting*).
+        1. 🟢 **Accumulation (Akumulasi):** Harga sedang di bawah dan mendatar. Bandar mengumpulkan saham dari ritel. *(Waktu terbaik cicil beli)*.
+        2. 🔵 **Markup (Fase Naik):** Bandar mulai mengerek harga naik dengan cepat. Terjadi Uptrend kuat. *(Hold/Tahan untung)*.
+        3. 🔴 **Distribution (Distribusi):** Harga tertahan di pucuk. Bandar mulai membuang barang ke ritel yang FOMO. *(Waspada)*.
+        4. 🟠 **Markdown (Fase Turun):** Bandar sudah keluar, harga dibiarkan jatuh bebas. *(Hindari saham ini)*.
         """)
         
     if submit_search and ticker:
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
         ticker_only = ticker.replace(".JK", "")
         
-        # --- PENCATATAN AUDIT LOG PENCARIAN SAHAM ---
+        # --- PENCATATAN AUDIT LOG ---
         try:
             supabase.table('audit_logs').insert({
-                "user_email": user_email,
-                "action": "SEARCH_CHART",
-                "details": f"Mencari analisis detail saham: {ticker_only}"
+                "user_email": user_email, "action": "SEARCH_CHART", "details": f"Mencari analisis detail saham: {ticker_only}"
             }).execute()
-        except Exception as e: 
-            st.warning(f"Sistem gagal merekam log analitik: {e}") 
+        except: pass
         
         ihsg_df = get_ihsg_data()
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
         if df.empty:
-            st.error("Saham tidak ditemukan!")
+            st.error("Saham tidak ditemukan! Pastikan kode benar.")
             return
 
         df = fix_dataframe(df)
@@ -545,7 +538,7 @@ def show_chart(use_idx_data):
         fig = make_subplots(
             rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.08,
             subplot_titles=(
-                "1. Pergerakan Harga, Moving Average, & Garis Target (Candlestick)", 
+                "1. Pergerakan Harga, Moving Average, & Garis Target Profit/Stop Loss", 
                 "2. Volume Transaksi Harian", 
                 "3. Jejak Akumulasi Uang Raksasa (Chaikin Money Flow)"
             )
@@ -627,7 +620,7 @@ if is_admin:
 mode = st.sidebar.radio("Pilih Menu:", menu_options)
 st.sidebar.divider()
 
-# Logika Smart UI Routing
+# Logika Smart UI Routing (Inti Perbaikan UX)
 use_idx_data = False
 active_stock_list = SHARIA_STOCKS
 active_category_name = "Lapis 1 (JII30)"
@@ -639,13 +632,13 @@ if mode == "🔍 Super Screener":
     if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
         active_stock_list = SHARIA_MIDCAP_STOCKS
         active_category_name = "Lapis 2"
-        # Sembunyikan Opsi IDX, Paksa Pakai Data Standar
-        st.sidebar.info("✨ Mode Screener Lapis 2 secara otomatis menggunakan **Data Standar (0 Kuota)** agar tidak menghabiskan limit API Anda sekaligus.")
+        # Sembunyikan Opsi IDX secara cerdas
+        st.sidebar.info("✨ Mode Screener Lapis 2 secara otomatis menggunakan **Data Standar (0 Kuota)** agar tidak menghabiskan limit API harian Anda sekaligus.")
         use_idx_data = False
     else:
         active_stock_list = SHARIA_STOCKS
         active_category_name = "Lapis 1 (JII30)"
-        # Tampilkan Opsi Data
+        # Tampilkan Opsi Data untuk Lapis 1
         if user_role == 'free':
             st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Data Standar). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).") 
             use_idx_data = False
@@ -654,11 +647,12 @@ if mode == "🔍 Super Screener":
             use_idx_data = "Data IDX" in data_source
 
 elif mode == "📊 Advanced Chart":
-    # Advanced Chart selalu memunculkan opsi sumber data untuk VIP/Pro
+    # Advanced Chart SELALU memunculkan opsi sumber data (Karena pencarian per emiten)
     if user_role == 'free':
         st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Data Standar). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).") 
         use_idx_data = False
     else:
+        st.sidebar.caption("💡 Anda bisa menggunakan Data IDX untuk membedah bandar saham Lapis 1 maupun Lapis 2 di sini.")
         data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Potong Kuota)"]) 
         use_idx_data = "Data IDX" in data_source
 
