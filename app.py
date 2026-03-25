@@ -654,7 +654,8 @@ use_idx_data = False
 active_stock_list = SHARIA_STOCKS
 active_category_name = "Lapis 1 (JII30)"
 
-if mode in ["🔍 Super Screener", "📅 Dividend Hunter"]:
+# 1. LOGIKA SIDEBAR: SUPER SCREENER
+if mode == "🔍 Super Screener":
     kategori_saham = st.sidebar.radio("Pilih Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
     st.sidebar.divider()
     
@@ -667,17 +668,33 @@ if mode in ["🔍 Super Screener", "📅 Dividend Hunter"]:
         active_stock_list = SHARIA_STOCKS
         active_category_name = "Lapis 1 (JII30)"
         
-        # FITUR ETALASE: Opsi Premium selalu tampil untuk menggoda user Free
+        # FITUR ETALASE
         data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Premium)"]) 
         if "Data IDX" in data_source:
             if user_role == 'free':
                 st.sidebar.warning("🔒 **Fitur Terkunci.** Anda menggunakan versi Free. Upgrade ke VIP/Pro untuk membuka visualisasi aliran Modal Asing!")
-                use_idx_data = False # Paksa kembali ke data standar secara diam-diam
+                use_idx_data = False 
             else:
                 use_idx_data = True
         else:
             use_idx_data = False
 
+# 2. LOGIKA SIDEBAR: DIVIDEND HUNTER (DIPISAH AGAR TIDAK MUNCUL OPSI API IDX)
+elif mode == "📅 Dividend Hunter":
+    kategori_saham = st.sidebar.radio("Pilih Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
+    st.sidebar.divider()
+    
+    if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
+        active_stock_list = SHARIA_MIDCAP_STOCKS
+        active_category_name = "Lapis 2"
+    else:
+        active_stock_list = SHARIA_STOCKS
+        active_category_name = "Lapis 1 (JII30)"
+        
+    use_idx_data = False # Mutlak false karena hanya pakai Yahoo Finance
+    st.sidebar.caption("🌐 Menggunakan Data Standar (Gratis - 0 Kuota)")
+
+# 3. LOGIKA SIDEBAR: ADVANCED CHART
 elif mode == "📊 Advanced Chart":
     # FITUR ETALASE DI CHART
     data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Premium)"]) 
