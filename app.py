@@ -337,16 +337,14 @@ def show_dividend_hunter(stock_list, category_name):
                 if pd.notna(div_rate) and div_rate > 0 and pd.notna(price) and price > 0:
                     calculated_yield = (div_rate / price) * 100
                 elif pd.notna(div_yield_raw) and div_yield_raw > 0:
-                    # Jika data rupiah kosong, terpaksa pakai persentase raw YF
                     calculated_yield = (div_yield_raw * 100) if div_yield_raw < 1 else div_yield_raw
                 else:
                     calculated_yield = 0
                 
-                # FILTER LOGIKA: Tidak mungkin ada dividen IHSG > 40%. Jika lebih, itu pasti data sampah.
+                # FILTER LOGIKA: Tidak mungkin ada dividen IHSG > 40%. Jika lebih, buang (data sampah).
                 if calculated_yield > 0 and calculated_yield <= 40:
                     ex_date_str = "Belum Diumumkan"
                     if ex_date_ts:
-                        # Konversi dari Unix Timestamp ke YYYY-MM-DD
                         ex_date_str = datetime.utcfromtimestamp(ex_date_ts).strftime('%Y-%m-%d')
                         
                     results.append({
@@ -374,6 +372,8 @@ def show_dividend_hunter(stock_list, category_name):
             )
         else:
             st.info("Belum ada data dividen yang masuk akal / tercatat untuk kategori ini hari ini.")
+
+
 # --- 11. FITUR SCREENER ---
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
@@ -401,14 +401,28 @@ def run_screener(use_idx_data, stock_list, category_name):
             * 🐳 **CMF** : Deteksi akumulasi bandar.
             * 💎 **RSI** : Harga diskon (Oversold).
             * 🚀 **EPS** : Laba perusahaan bertumbuh.
+            
+            **🏢 Kategori Saham (DIKEMBALIKAN):**
+            * 👑 **Lapis 1 (JII30)**: Saham *Bluechip* besar & stabil (ADRO, ASII, dll).
+            * 🚀 **Lapis 2 (Mid-Caps)**: Saham gesit berpotensi *gain* tinggi (BRMS, SIDO, dll).
             """)
 
     if st.button("MULAI SCANNING"):
+        # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 + Data IDX)
         if category_name == "Lapis 1 (JII30)" and use_idx_data:
             with st.spinner("⚡ Menyedot data dari Server..."):
                 res = supabase.table('jii30_daily_data').select('*').execute()
                 if res.data:
                     df_res = pd.DataFrame(res.data)
+                    
+                    # --- PERBAIKAN: FILTER DATA TERBARU (ANTI DUPLIKAT) ---
+                    if 'fetch_date' in df_res.columns:
+                        latest_date = df_res['fetch_date'].max()
+                        df_res = df_res[df_res['fetch_date'] == latest_date]
+                        update_text = latest_date
+                    else:
+                        update_text = "Hari Ini"
+                        
                     if user_role == 'free':
                         df_res['power_asing'] = None; df_res['modal_asing'] = None
                     df_res = df_res[['kode', 'harga', 'tp', 'sl', 'fase', 'power_asing', 'modal_asing', 'status', 'katalis']]
@@ -416,7 +430,11 @@ def run_screener(use_idx_data, stock_list, category_name):
                     
                     st.success(f"✅ Selesai! Ditemukan {len(df_res)} Saham.")
                     
+                    # --- PERBAIKAN: KEMBALIKAN TEKS TANGGAL UPDATE ---
+                    st.caption(f"📅 **Terakhir Diupdate (Oleh Server):** {update_text}")
+                    
                     col_config = {
+                        "Kode": st.column_config.TextColumn(width="small"),
                         "Harga": st.column_config.NumberColumn(format="Rp %d"),
                         "TP": st.column_config.NumberColumn(format="Rp %d"),
                         "SL": st.column_config.NumberColumn(format="Rp %d"),
@@ -430,9 +448,13 @@ def run_screener(use_idx_data, stock_list, category_name):
 
                     st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
                 else: st.warning("⚠️ Data server IDX masih kosong.")
+                
+        # JALUR 2: SCANNING LIVE (Data Standar / Lapis 2)
         else:
             progress = st.progress(0); status = st.empty(); results = []
             tickers = [f"{s}.JK" for s in stock_list]
+            
+            status.text("Mengambil Data IHSG...")
             ihsg_df = get_ihsg_data()
             price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
             
@@ -478,20 +500,21 @@ def run_screener(use_idx_data, stock_list, category_name):
 def show_chart(use_idx_data):
     st.header("📊 Deep Analysis & Target Tracker")
     
+    # KAMUS KHUSUS CHART & GRAFIK
     with st.expander("📖 Panduan Membaca Fase & Grafik (Klik di sini)"):
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("""
             **Fase Bandar (Wyckoff):**
-            1. 🟢 **Accumulation:** Harga di bawah. Waktu terbaik cicil beli.
-            2. 🔵 **Markup:** Harga terbang uptrend. Tahan untung.
-            3. 🔴 **Distribution:** Harga di pucuk. Bandar jualan. Waspada.
-            4. 🟠 **Markdown:** Harga jatuh bebas. Hindari.
+            1. 🟢 **Accumulation:** Harga mendatar di bawah. Bandar mengumpulkan barang. *(Waktu terbaik cicil beli)*.
+            2. 🔵 **Markup:** Harga terbang. Uptrend kuat. *(Fase nikmat tahan untung)*.
+            3. 🔴 **Distribution:** Harga tertahan di pucuk. Bandar mulai jualan. *(Waspada)*.
+            4. 🟠 **Markdown:** Bandar keluar, harga jatuh bebas. *(Hindari saham ini)*.
             """)
         with c2:
             st.markdown("""
-            **🎯 Target & Stop Loss:** Jarak otomatis melebar saat saham liar (Sistem ATR).
-            **🐳 Garis Biru:** Posisi modal rata-rata Asing (Hanya di Data IDX).
+            **🎯 Target & Stop Loss:** Menggunakan sistem ATR. Jarak TP/SL otomatis melebar saat saham bergerak liar agar Anda tidak tersapu whipsaw.
+            **🐳 Garis Biru Putus-Putus:** Menunjukkan letak pertahanan harga modal rata-rata Asing hari ini (Hanya tersedia jika menggunakan Data IDX).
             """)
     st.divider()
 
@@ -512,7 +535,7 @@ def show_chart(use_idx_data):
         ihsg_df = get_ihsg_data()
         df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
         if df.empty:
-            st.error("Saham tidak ditemukan!")
+            st.error("Saham tidak ditemukan! Pastikan kode benar.")
             return
 
         df = fix_dataframe(df)
@@ -524,7 +547,7 @@ def show_chart(use_idx_data):
         wyckoff_phase, divergence = advanced_analysis(df)
         total_score = s_tech + s_fund + s_bandar + s_candle
         
-        # BANNER REKOMENDASI
+        # BANNER REKOMENDASI AI
         rec_status = "WAIT (Hindari / Pantau Saja)"
         if total_score >= 6 or "BULLISH DIV" in divergence or "🔥 MA" in reasons: 
             rec_status = "💎 STRONG BUY (Sangat Disarankan)"
@@ -549,9 +572,11 @@ def show_chart(use_idx_data):
         stop_loss = close - (1.5 * atr) if atr > 0 else close
         target_profit = close + (3.0 * atr) if atr > 0 else close
             
+        # LOGIKA WARNA METRIK (Psikologi Trading)
         c1, c2, c3, c4 = st.columns(4)
         
         fase_color = "normal"  
+        # Jika Markdown/Distribution, beri tanda minus agar panah ke bawah & warna MERAH
         fase_text = f"-{wyckoff_phase}" if "Markdown" in wyckoff_phase or "Distribution" in wyckoff_phase else wyckoff_phase
         c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", fase_text, delta_color=fase_color)
         
@@ -567,11 +592,13 @@ def show_chart(use_idx_data):
         
         is_outperform = "🌟 IHSG" in " ".join(reasons)
         eps_g = fund.get('EPS_Growth') if fund else None
+        # Jika underperform, beri tanda minus agar panah ke bawah & warna MERAH
         pasar_text = "🌟 MENGALAHKAN IHSG" if is_outperform else "-📉 UNDERPERFORM"
         c4.metric("Status vs Pasar", pasar_text, f"Laba: +{eps_g*100:.1f}%" if eps_g and eps_g > 0 else "Laba: N/A", delta_color="normal")
         
+        # VISUALISASI GRAFIK
         st.subheader(f"Visualisasi Grafik {ticker_only}")
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.08, subplot_titles=("1. Pergerakan Harga & Target", "2. Volume Harian", "3. Akumulasi Bandar (CMF)"))
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.08, subplot_titles=("1. Pergerakan Harga, Moving Average, & Target", "2. Volume Transaksi Harian", "3. Jejak Akumulasi Uang Raksasa (CMF)"))
         
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange')), row=1, col=1)
@@ -594,7 +621,8 @@ def show_chart(use_idx_data):
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=10, r=10, t=60, b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- 13. FITUR ADMIN DASHBOARD (EKSKLUSIF) ---
+
+# --- 13. FITUR ADMIN DASHBOARD ---
 def show_admin_dashboard():
     st.header("👑 Admin Dashboard & Audit Logs")
     st.markdown("Pusat kendali intelijen dan analitik pengguna. Data ditarik secara *real-time* dari server.")
@@ -604,7 +632,6 @@ def show_admin_dashboard():
     
     with tab1:
         st.subheader("Riwayat Login & Persetujuan ToS")
-        st.caption("Gunakan data ini sebagai bukti legal bahwa pengguna telah menyetujui Disclaimer Risiko sebelum masuk ke aplikasi.")
         if st.button("Muat Data Persetujuan ToS", type="primary"):
             with st.spinner("Mengambil log dari database..."):
                 res = supabase.table('audit_logs').select('*').eq('action', 'LOGIN_TOS_ACCEPTED').order('created_at', desc=True).limit(100).execute()
@@ -612,12 +639,10 @@ def show_admin_dashboard():
                     df = pd.DataFrame(res.data)
                     df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
                     st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
-                else:
-                    st.info("Belum ada data log persetujuan ToS.")
+                else: st.info("Belum ada data log persetujuan ToS.")
                     
     with tab2:
         st.subheader("Riwayat Pencarian Saham oleh User")
-        st.caption("Pantau saham apa saja yang sedang ramai dicari oleh pengguna Anda untuk riset tren pasar.")
         if st.button("Muat Data Pencarian Saham", type="primary"):
             with st.spinner("Mengambil log dari database..."):
                 res = supabase.table('audit_logs').select('*').eq('action', 'SEARCH_CHART').order('created_at', desc=True).limit(100).execute()
@@ -625,23 +650,19 @@ def show_admin_dashboard():
                     df = pd.DataFrame(res.data)
                     df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
                     st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
-                else:
-                    st.info("Belum ada data log pencarian saham.")
+                else: st.info("Belum ada data log pencarian saham.")
 
 
 # --- 14. PENGATURAN SIDEBAR & SMART ROUTING (ETALASE FREEMIUM) ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 st.sidebar.caption(f"Status Akun: **{user_role.upper()}**")
 
-# Cek Sisa Kuota Realtime dari DB
 try:
     current_db = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).execute().data[0]
     st.sidebar.caption(f"Sisa Kuota API Personal: **{current_db['daily_quota'] - current_db['used_quota']} / {current_db['daily_quota']}**")
 except: pass
-
 st.sidebar.divider()
 
-# Dinamisasi Pilihan Menu Utama
 menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "📅 Dividend Hunter"]
 if is_admin:
     menu_options.append("👑 Admin Dashboard")
@@ -649,7 +670,6 @@ if is_admin:
 mode = st.sidebar.radio("Pilih Menu:", menu_options)
 st.sidebar.divider()
 
-# Logika Smart UI Routing & Etalase Upsell
 use_idx_data = False
 active_stock_list = SHARIA_STOCKS
 active_category_name = "Lapis 1 (JII30)"
@@ -668,18 +688,16 @@ if mode == "🔍 Super Screener":
         active_stock_list = SHARIA_STOCKS
         active_category_name = "Lapis 1 (JII30)"
         
-        # FITUR ETALASE
+        # ETALASE: Opsi Premium selalu tampil untuk menggoda user Free
         data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Premium)"]) 
         if "Data IDX" in data_source:
             if user_role == 'free':
                 st.sidebar.warning("🔒 **Fitur Terkunci.** Anda menggunakan versi Free. Upgrade ke VIP/Pro untuk membuka visualisasi aliran Modal Asing!")
                 use_idx_data = False 
-            else:
-                use_idx_data = True
-        else:
-            use_idx_data = False
+            else: use_idx_data = True
+        else: use_idx_data = False
 
-# 2. LOGIKA SIDEBAR: DIVIDEND HUNTER (DIPISAH AGAR TIDAK MUNCUL OPSI API IDX)
+# 2. LOGIKA SIDEBAR: DIVIDEND HUNTER
 elif mode == "📅 Dividend Hunter":
     kategori_saham = st.sidebar.radio("Pilih Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
     st.sidebar.divider()
@@ -696,16 +714,13 @@ elif mode == "📅 Dividend Hunter":
 
 # 3. LOGIKA SIDEBAR: ADVANCED CHART
 elif mode == "📊 Advanced Chart":
-    # FITUR ETALASE DI CHART
     data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Premium)"]) 
     if "Data IDX" in data_source:
         if user_role == 'free':
             st.sidebar.warning("🔒 **Fitur Terkunci.** Anda menggunakan versi Free. Upgrade ke VIP/Pro untuk memunculkan Garis Biru pertahanan Bandar Asing di grafik!")
             use_idx_data = False
-        else:
-            use_idx_data = True
-    else:
-        use_idx_data = False
+        else: use_idx_data = True
+    else: use_idx_data = False
 
 if is_admin:
     st.sidebar.divider()
