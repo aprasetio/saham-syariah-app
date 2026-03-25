@@ -402,9 +402,9 @@ def run_screener(use_idx_data, stock_list, category_name):
             * 💎 **RSI** : Harga diskon (Oversold).
             * 🚀 **EPS** : Laba perusahaan bertumbuh.
             
-            **🏢 Kategori Saham (DIKEMBALIKAN):**
-            * 👑 **Lapis 1 (JII30)**: Saham *Bluechip* besar & stabil (ADRO, ASII, dll).
-            * 🚀 **Lapis 2 (Mid-Caps)**: Saham gesit berpotensi *gain* tinggi (BRMS, SIDO, dll).
+            **🏢 Kategori Saham:**
+            * 👑 **Lapis 1 (JII30)**: ADRO, AKRA, ANTM, BRIS, BRPT, CPIN, EXCL, HRUM, ICBP, INCO, INDF, INKP, INTP, ITMG, KLBF, MAPI, MBMA, MDKA, MEDC, PGAS, PGEO, PTBA, SMGR, TLKM, UNTR, UNVR, ACES, AMRT, ASII, TPIA.
+            * 🚀 **Lapis 2 (Mid-Caps)**: BRMS, ELSA, ENRG, PTRO, SIDO, MYOR, ESSA, CTRA, BSDE, SMRA, PWON, ARTO, BTPS, MIKA, HEAL, SILO, MAPA, AUTO, SMSM, TAPG, DSNG, LSIP, AALI, WIKA, PTPP, TOTL, NRCA, SCMA, MNCN, ERAA.
             """)
 
     if st.button("MULAI SCANNING"):
