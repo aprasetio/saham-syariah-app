@@ -29,7 +29,7 @@ def get_api_registry():
 
 api_registry = get_api_registry()
 
-# --- 4. SISTEM LOGIN SAAS DENGAN TOS, DISCLAIMER & AUDIT LOG ---
+# --- 4. SISTEM LOGIN SAAS DENGAN TOS & AUDIT LOG ---
 def login_ui():
     st.markdown("<h1 style='text-align: center;'>🔒 Portal Login Member</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -41,46 +41,12 @@ def login_ui():
         st.caption("📜 **Persetujuan Layanan (Wajib Dibaca)**")
         with st.container(height=200):
             st.markdown("""
-            **SYARAT DAN KETENTUAN LAYANAN (TERMS OF SERVICE)**
+            **SYARAT DAN KETENTUAN LAYANAN & DISCLAIMER**
             
-            Selamat datang di platform kami. Dengan mengakses atau menggunakan layanan kami, Anda dianggap telah membaca, memahami, dan menyetujui untuk terikat oleh Syarat dan Ketentuan berikut:
-            
-            **1. Deskripsi Layanan**
-            Platform ini menyediakan layanan analisis data pasar modal dan instrumen keuangan lainnya. Kami menawarkan dua jenis akses layanan:
-            * **Layanan Gratis:** Memberikan akses terbatas pada ringkasan analisis umum dan data dengan waktu pembaruan yang tertunda (delayed).
-            * **Layanan Berbayar (Premium):** Memberikan akses ke fitur analisis mendalam, visualisasi data yang lebih komprehensif, dan frekuensi pembaruan data yang lebih tinggi sesuai paket langganan yang dipilih.
-            
-            **2. Pembatasan Penggunaan**
-            * Layanan ini hanya ditujukan untuk penggunaan pribadi dan non-komersial.
-            * Pengguna dilarang keras melakukan penggandaan, pendistribusian ulang, penjualan kembali, atau eksploitasi data mentah maupun hasil analisis dari platform ini ke pihak ketiga tanpa izin tertulis dari kami.
-            * Penggunaan skrip otomatis, bot, scraping, atau teknologi serupa untuk mengambil data dari platform ini dilarang dan dapat berakibat pada pemblokiran akun secara permanen.
-            
-            **3. Akun dan Keamanan**
-            Pengguna bertanggung jawab penuh atas kerahasiaan informasi akun dan kata sandi mereka. Segala aktivitas yang terjadi di bawah akun pengguna adalah tanggung jawab penuh pemilik akun.
-            
-            **4. Kebijakan Langganan dan Pembatalan**
-            * Biaya langganan untuk Layanan Berbayar bersifat final dan tidak dapat dikembalikan (non-refundable), kecuali dinyatakan lain secara tertulis oleh kami.
-            * Kami berhak mengubah biaya langganan atau fitur dalam paket layanan dengan pemberitahuan sebelumnya melalui platform atau email resmi.
-            
-            **5. Perubahan Ketentuan**
-            Kami berhak untuk mengubah atau memperbarui Syarat dan Ketentuan ini sewaktu-waktu. Perubahan akan berlaku segera setelah dipublikasikan di platform ini.
-            
-            ---
-            **SANGGAHAN PENTING (DISCLAIMER)**
-            
-            Penting untuk dipahami bahwa seluruh informasi yang disajikan dalam platform ini adalah untuk tujuan edukasi dan referensi semata.
-            
-            **1. Bukan Nasihat Investasi**
-            Kami bukan penasihat investasi berlisensi. Seluruh konten, hasil analisis, dan sinyal yang ditampilkan BUKAN merupakan perintah atau ajakan untuk membeli, menjual, atau menahan instrumen keuangan apa pun. Keputusan investasi sepenuhnya berada di tangan Anda.
-            
-            **2. Risiko Pasar**
-            Investasi di pasar modal memiliki risiko tinggi, termasuk risiko kehilangan seluruh modal. Kinerja masa lalu tidak menjamin hasil di masa depan. Kami sangat menyarankan Anda untuk melakukan analisis mandiri (Do Your Own Research) atau berkonsultasi dengan penasihat keuangan profesional sebelum mengambil keputusan finansial.
-            
-            **3. Integritas Data**
-            Data yang disajikan diperoleh dari penyedia data pihak ketiga yang dianggap tepercaya. Namun, kami tidak menjamin akurasi, kelengkapan, atau ketepatan waktu data tersebut. Kami tidak bertanggung jawab atas kerugian finansial, langsung maupun tidak langsung, yang timbul akibat kesalahan teknis, keterlambatan data, atau ketidakakuratan informasi dalam platform ini.
-            
-            **4. Batasan Tanggung Jawab**
-            Dengan menggunakan layanan ini, Anda setuju untuk membebaskan kami dari segala tuntutan hukum atau kerugian yang timbul akibat keputusan yang Anda ambil berdasarkan informasi yang diperoleh dari platform ini.
+            1. **Bukan Nasihat Investasi:** Platform ini menyediakan analisis data pasar. Seluruh konten BUKAN merupakan ajakan pasti untuk membeli/menjual saham.
+            2. **Risiko Pasar:** Perdagangan saham memiliki risiko tinggi. Keputusan dan kerugian sepenuhnya tanggung jawab pribadi pengguna.
+            3. **Integritas Data:** Kami tidak menjamin 100% akurasi data pihak ketiga dan dibebaskan dari tuntutan kerugian akibat kendala teknis.
+            4. **Penggunaan:** Dilarang keras menyalin, menjual kembali, atau melakukan scraping pada data aplikasi ini tanpa izin.
             """)
         
         agree_tos = st.checkbox("✅ Saya telah membaca, memahami, dan menyetujui Syarat & Ketentuan serta Disclaimer di atas.")
@@ -99,13 +65,9 @@ def login_ui():
                         
                         try:
                             supabase.table('audit_logs').insert({
-                                "user_email": email,
-                                "action": "LOGIN_TOS_ACCEPTED",
-                                "details": "User sukses login dan menyetujui Syarat & Ketentuan serta Disclaimer."
+                                "user_email": email, "action": "LOGIN_TOS_ACCEPTED", "details": "User sukses login dan setuju ToS."
                             }).execute()
-                        except Exception as e: 
-                            st.warning(f"Sistem gagal merekam log ke database: {e}") 
-                            time.sleep(2) 
+                        except: pass
                             
                         st.rerun()
                     else: st.error("Profil tidak ditemukan di database!")
@@ -126,10 +88,9 @@ is_admin = (user_role == 'admin')
 try:
     wib_today = (datetime.utcnow() + timedelta(hours=7)).strftime('%Y-%m-%d')
     user_profile = supabase.table('profiles').select('daily_quota, used_quota, last_reset_date').eq('id', user_id).execute().data[0]
-    
     if user_profile.get('last_reset_date') != wib_today:
         supabase.table('profiles').update({'used_quota': 0, 'last_reset_date': wib_today}).eq('id', user_id).execute()
-except Exception as e: pass
+except: pass
 
 def check_and_deduct_quota(cache_key):
     if cache_key in api_registry or is_admin: return True
@@ -139,7 +100,7 @@ def check_and_deduct_quota(cache_key):
             supabase.table('profiles').update({'used_quota': fresh_db['used_quota'] + 1}).eq('id', user_id).execute()
             return True
         return False
-    except Exception as e: return False
+    except: return False
 
 # --- 6. CSS FIX (Teks Box Metrik Tidak Terpotong) ---
 st.markdown("""
@@ -275,7 +236,7 @@ def calculate_metrics(df, ihsg_df=None):
 def advanced_analysis(df):
     if len(df) < 15: return "N/A", "-"
     curr = df.iloc[-1]
-    close, ma20, ma50, cmf = curr['Close'], curr['SMA20'], curr['SMA50'], curr['CMF']
+    close, ma20, ma50 = curr['Close'], curr['SMA20'], curr['SMA50']
     phase = "Sideways"
     if close > ma50: phase = "🔵 Markup" if close > ma20 else "🔴 Distribution"
     else: phase = "🟠 Markdown" if close < ma20 else "🟢 Accumulation"
@@ -318,7 +279,7 @@ def score_analysis(df, fund_data):
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     
-    # KAMUS KOMPREHENSIF (Menjawab kebingungan user awam)
+    # KAMUS KOMPREHENSIF
     with st.expander("📖 Kamus Pintar & Panduan Aplikasi (Klik untuk membuka)"):
         st.info("💡 **Tips:** Kombinasi Katalis yang banyak (contoh: 🔥🌟🐳) menandakan probabilitas kenaikan harga yang lebih tinggi.")
         
@@ -326,60 +287,54 @@ def run_screener(use_idx_data, stock_list, category_name):
         with c1:
             st.markdown("""
             **⚡ Membaca Power Asing (% Dominasi):**
-            Angka ini menunjukkan seberapa besar pengaruh Uang Asing terhadap pergerakan saham hari ini.
-            * **< 5% (Lemah)** : Asing tidak terlalu peduli. Harga digerakkan oleh ritel/bandar lokal.
+            * **< 5% (Lemah)** : Asing tidak terlalu peduli. Digerakkan lokal.
             * **5% - 15% (Sedang)** : Mulai ada ketertarikan Asing (Akumulasi wajar).
-            * **15% - 30% (Kuat)** : Asing bertindak sebagai *Market Maker* (Menyetir harga).
-            * **> 30% (Sangat Kuat)** : Saham dikendalikan penuh/diborong brutal oleh Asing.
+            * **15% - 30% (Kuat)** : Asing bertindak sebagai *Market Maker*.
+            * **> 30% (Sangat Kuat)** : Saham diborong brutal oleh Asing.
             
             **📊 Status Rekomendasi:**
             * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna (Uptrend kuat + Akumulasi).
             * ✅ **BUY** : Saham mulai menunjukkan tanda kebangkitan / pantulan.
             
             **🎯 Rahasia Target Profit (TP) & Stop Loss (SL):**
-            Aplikasi ini **TIDAK** menggunakan tebak-tebakan Support/Resistance. Kami menggunakan teknologi **ATR (Average True Range)** yang mengukur keliaran saham. Jika saham bergerak liar, jarak SL/TP otomatis melebar agar Anda tidak tersapu pergerakan harga palsu (*whipsaw*). Kami mengunci Rasio Risiko 1:2 (Misal: Risiko rugi Rp 1.000 untuk potensi untung Rp 2.000).
+            Aplikasi ini menggunakan teknologi **ATR (Average True Range)** yang mengukur keliaran saham. Jika saham bergerak liar, jarak SL/TP otomatis melebar agar Anda tidak tersapu pergerakan harga palsu (*whipsaw*). Kami mengunci Rasio Risiko 1:2 (Misal: Risiko rugi Rp 1.000 untuk potensi untung Rp 2.000).
             """)
         with c2:
             st.markdown("""
             **🔖 Arti Simbol Katalis (Pemicu Kenaikan):**
-            * 🔥 **MA (Moving Average)** : Harga sedang Uptrend (di atas garis rata-rata).
-            * 🌟 **IHSG (Outperform)** : Saham ini berlari lebih kencang daripada IHSG.
-            * 🐳 **CMF (Chaikin Money Flow)** : Deteksi suntikan dana raksasa (Bandar masuk).
-            * 💎 **RSI (Oversold)** : Harga saham sudah jatuh terlalu dalam (Diskon/Murah).
-            * 🚀 **EPS (Earning)** : Laba bersih perusahaan bertumbuh di atas 10%.
-            * 🕯️ **Pola (Candlestick)** : Muncul pola pantulan di grafik (*Hammer* / *Engulfing*).
+            * 🔥 **MA (Moving Average)** : Harga sedang Uptrend.
+            * 🌟 **IHSG (Outperform)** : Saham berlari lebih kencang dari IHSG.
+            * 🐳 **CMF (Money Flow)** : Deteksi suntikan dana raksasa.
+            * 💎 **RSI (Oversold)** : Harga jatuh terlalu dalam (Diskon).
+            * 🚀 **EPS (Earning)** : Laba bersih bertumbuh di atas 10%.
+            * 🕯️ **Pola (Candlestick)** : Muncul pola pantulan di grafik.
             
             **🏢 Kategori Saham:**
-            * 👑 **Lapis 1 (JII30)**: Saham *Bluechip* besar & stabil (ADRO, AKRA, ANTM, BRIS, BRPT, CPIN, EXCL, HRUM, ICBP, INCO, INDF, INKP, INTP, ITMG, KLBF, MAPI, MBMA, MDKA, MEDC, PGAS, PGEO, PTBA, SMGR, TLKM, UNTR, UNVR, ACES, AMRT, ASII, TPIA).
-            * 🚀 **Lapis 2 (Mid-Caps)**: Saham gesit berpotensi *gain* tinggi (BRMS, ELSA, ENRG, PTRO, SIDO, MYOR, ESSA, CTRA, BSDE, SMRA, PWON, ARTO, BTPS, MIKA, HEAL, SILO, MAPA, AUTO, SMSM, TAPG, DSNG, LSIP, AALI, WIKA, PTPP, TOTL, NRCA, SCMA, MNCN, ERAA).
+            * 👑 **Lapis 1 (JII30)**: Saham *Bluechip* besar & stabil (ADRO, ASII, BBCA, TLKM, dll).
+            * 🚀 **Lapis 2 (Mid-Caps)**: Saham gesit berpotensi *gain* tinggi (BRMS, SIDO, ARTO, dll).
             """)
 
     if st.button("MULAI SCANNING"):
-        # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 + Data IDX)
         if category_name == "Lapis 1 (JII30)" and use_idx_data:
             with st.spinner("⚡ Menyedot data matang dari Server..."):
                 res = supabase.table('jii30_daily_data').select('*').execute()
                 if res.data:
                     df_res = pd.DataFrame(res.data)
-                    
                     if user_role == 'free':
-                        df_res['power_asing'] = None
-                        df_res['modal_asing'] = None
+                        df_res['power_asing'] = None; df_res['modal_asing'] = None
                         
                     df_res = df_res[['kode', 'harga', 'tp', 'sl', 'fase', 'power_asing', 'modal_asing', 'status', 'katalis']]
                     df_res.columns = ['Kode', 'Harga', 'TP', 'SL', 'Fase', 'Power Asing', 'Modal Asing', 'Status', 'Katalis']
                     
-                    st.success(f"✅ Selesai! (Loading Instan | 0 Kuota API) - Ditemukan {len(df_res)} Saham.")
-                    st.caption(f"📅 **Terakhir Diupdate oleh Server Robot:** {res.data[0]['fetch_date'] if 'fetch_date' in res.data[0] else 'Hari Ini'}")
+                    st.success(f"✅ Selesai! Ditemukan {len(df_res)} Saham.")
+                    st.caption(f"📅 **Terakhir Diupdate:** {res.data[0]['fetch_date'] if 'fetch_date' in res.data[0] else 'Hari Ini'}")
                     
                     col_config = {
                         "Kode": st.column_config.TextColumn(width="small"),
                         "Harga": st.column_config.NumberColumn(format="Rp %d"),
                         "TP": st.column_config.NumberColumn(format="Rp %d"),
                         "SL": st.column_config.NumberColumn(format="Rp %d"),
-                        "Katalis": st.column_config.TextColumn(width="medium")
                     }
-                    
                     if user_role == 'free':
                         col_config["Power Asing"] = st.column_config.TextColumn(default="🔒 VIP")
                         col_config["Modal Asing"] = st.column_config.TextColumn(default="🔒 VIP")
@@ -388,14 +343,9 @@ def run_screener(use_idx_data, stock_list, category_name):
                         col_config["Modal Asing"] = st.column_config.NumberColumn(format="Rp %d")
 
                     st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
-                else:
-                    st.warning("⚠️ Data server IDX masih kosong hari ini. Silakan gunakan mode Data Standar.")
-
-        # JALUR 2: SCANNING LIVE (Data Standar / Lapis 2)
+                else: st.warning("⚠️ Data server IDX masih kosong hari ini.")
         else:
-            progress = st.progress(0)
-            status = st.empty()
-            results = []
+            progress = st.progress(0); status = st.empty(); results = []
             tickers = [f"{s}.JK" for s in stock_list]
             
             status.text("Mengambil Data IHSG...")
@@ -406,11 +356,8 @@ def run_screener(use_idx_data, stock_list, category_name):
                 status.text(f"Menganalisa: {t} ...")
                 progress.progress((i+1)/len(tickers))
                 try:
-                    df = price_data[t].copy()
-                    df = fix_dataframe(df)
-                    df = df[df['Volume'] > 0] 
+                    df = price_data[t].copy(); df = fix_dataframe(df); df = df[df['Volume'] > 0] 
                     if df.empty or len(df) < 50: continue
-                    
                     min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
                     if df['Volume'].iloc[-1] < min_vol: continue
                     
@@ -427,7 +374,6 @@ def run_screener(use_idx_data, stock_list, category_name):
                     rec = "WAIT"
                     if total_score >= 6 or "BULLISH DIV" in divergence or "🔥 MA" in reasons: rec = "💎 STRONG BUY"
                     elif total_score >= 4 or "Accumulation" in wyckoff_phase: rec = "✅ BUY"
-                    
                     if total_score < 3 and "Accumulation" not in wyckoff_phase: continue
                     
                     results.append({
@@ -435,27 +381,14 @@ def run_screener(use_idx_data, stock_list, category_name):
                         "Fase": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
                         "Power Asing": 0.0, "Modal Asing": 0, "Status": rec, "Katalis": ", ".join(reasons) if reasons else "-"
                     })
-                except Exception as e: continue
+                except: continue
                 
             progress.empty(); status.empty()
-            
             if results:
                 df_res = pd.DataFrame(results)
-                st.success(f"Selesai! {len(results)} Saham {category_name} Ditemukan.")
-                st.caption("🌐 **Sumber:** Data Standar (Data Asing Dinonaktifkan)") 
-                
-                st.dataframe(df_res, use_container_width=True, hide_index=True,
-                    column_config={
-                        "Kode": st.column_config.TextColumn(width="small"),
-                        "Harga": st.column_config.NumberColumn(format="Rp %d"),
-                        "TP": st.column_config.NumberColumn(format="Rp %d"),
-                        "SL": st.column_config.NumberColumn(format="Rp %d"),
-                        "Power Asing": st.column_config.TextColumn(default="Tidak Tersedia"),
-                        "Modal Asing": st.column_config.TextColumn(default="Tidak Tersedia"),
-                        "Katalis": st.column_config.TextColumn(width="medium")
-                    }
-                )
-            else: st.warning("Data kosong / Tidak ada saham yang lolos kriteria teknikal hari ini.")
+                st.success(f"Selesai! {len(results)} Saham Ditemukan.")
+                st.dataframe(df_res, use_container_width=True, hide_index=True)
+            else: st.warning("Tidak ada saham yang lolos kriteria teknikal hari ini.")
 
 # --- 11. FITUR CHART DETAIL ---
 def show_chart(use_idx_data):
@@ -467,24 +400,12 @@ def show_chart(use_idx_data):
             st.markdown("<br>", unsafe_allow_html=True)
             submit_search = st.form_submit_button("Cari Saham 🔍")
             
-    with st.expander("📖 Panduan Membaca Fase Wyckoff & Grafik (Klik di sini)"):
-        st.markdown("""
-        **Siklus Pergerakan Harga Bandar (Wyckoff Phase):**
-        1. 🟢 **Accumulation (Akumulasi):** Harga sedang di bawah dan mendatar. Bandar mengumpulkan saham dari ritel. *(Waktu terbaik cicil beli)*.
-        2. 🔵 **Markup (Fase Naik):** Bandar mulai mengerek harga naik dengan cepat. Terjadi Uptrend kuat. *(Hold/Tahan untung)*.
-        3. 🔴 **Distribution (Distribusi):** Harga tertahan di pucuk. Bandar mulai membuang barang ke ritel yang FOMO. *(Waspada)*.
-        4. 🟠 **Markdown (Fase Turun):** Bandar sudah keluar, harga dibiarkan jatuh bebas. *(Hindari saham ini)*.
-        """)
-        
     if submit_search and ticker:
         symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
         ticker_only = ticker.replace(".JK", "")
         
-        # --- PENCATATAN AUDIT LOG ---
         try:
-            supabase.table('audit_logs').insert({
-                "user_email": user_email, "action": "SEARCH_CHART", "details": f"Mencari analisis detail saham: {ticker_only}"
-            }).execute()
+            supabase.table('audit_logs').insert({"user_email": user_email, "action": "SEARCH_CHART", "details": f"Mencari analisis detail saham: {ticker_only}"}).execute()
         except: pass
         
         ihsg_df = get_ihsg_data()
@@ -516,25 +437,44 @@ def show_chart(use_idx_data):
         daily_turnover = close * volume
         stop_loss = close - (1.5 * atr) if atr > 0 else close
         target_profit = close + (3.0 * atr) if atr > 0 else close
-        tp_pct = ((target_profit - close) / close) * 100 if atr > 0 else 0
             
+        # --- PERBAIKAN LOGIKA WARNA METRIK ---
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", wyckoff_phase)
-        c2.metric("Target & Stop Loss", f"Rp {int(target_profit):,}", f"Cut Loss: Rp {int(stop_loss):,} (+{tp_pct:.1f}%)", delta_color="normal")
         
+        # 1. Logika Fase (Merah untuk Markdown/Distribution)
+        if "Markdown" in wyckoff_phase or "Distribution" in wyckoff_phase:
+            fase_color = "inverse"  
+            fase_text = f"-{wyckoff_phase}" # Tanda minus memunculkan panah ke bawah (Merah)
+        else:
+            fase_color = "normal"   
+            fase_text = wyckoff_phase # Panah ke atas (Hijau)
+            
+        c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", fase_text, delta_color=fase_color)
+        
+        # 2. Logika Target & Stop Loss (Netral / Abu-abu)
+        tp_pct = ((target_profit - close) / close) * 100 if close > 0 else 0
+        sl_pct = ((close - stop_loss) / close) * 100 if close > 0 else 0
+        
+        c2.metric(
+            f"Target Profit (+{tp_pct:.1f}%)", 
+            f"Rp {int(target_profit):,}", 
+            f"Batas Rugi (SL): Rp {int(stop_loss):,} (-{sl_pct:.1f}%)", 
+            delta_color="off" # Sengaja abu-abu agar user objektif melihat batas cut loss
+        )
+        
+        # 3. Metrik Asing
         if net_foreign is not None:
             power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
             c3.metric(f"Asing ({'🟢 AKUMULASI' if net_foreign > 0 else '🔴 DISTRIBUSI'})", format_rupiah(net_foreign), f"Dominasi: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}", delta_color="normal" if net_foreign > 0 else "inverse")
         else:
             c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Data Standar / Kuota Habis", delta_color="off") 
         
+        # 4. Metrik vs Pasar
         is_outperform = "🌟 IHSG" in " ".join(reasons)
         eps_g = fund.get('EPS_Growth') if fund else None
-        c4.metric("Status vs Pasar (RRG)", "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM", f"Laba: +{eps_g*100:.1f}%" if eps_g and eps_g > 0 else "Laba: N/A", delta_color="normal" if is_outperform else "off")
+        c4.metric("Status vs Pasar", "🌟 MENGALAHKAN IHSG" if is_outperform else "📉 UNDERPERFORM", f"Laba: +{eps_g*100:.1f}%" if eps_g and eps_g > 0 else "Laba: N/A", delta_color="normal" if is_outperform else "off")
         
         st.subheader(f"Visualisasi Grafik {ticker_only}")
-        
-        # --- PENAMBAHAN JUDUL PADA SUBPLOT ---
         fig = make_subplots(
             rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.08,
             subplot_titles=(
@@ -620,7 +560,7 @@ if is_admin:
 mode = st.sidebar.radio("Pilih Menu:", menu_options)
 st.sidebar.divider()
 
-# Logika Smart UI Routing (Inti Perbaikan UX)
+# Logika Smart UI Routing (Inti Perbaikan UX Sidebar)
 use_idx_data = False
 active_stock_list = SHARIA_STOCKS
 active_category_name = "Lapis 1 (JII30)"
@@ -632,13 +572,13 @@ if mode == "🔍 Super Screener":
     if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
         active_stock_list = SHARIA_MIDCAP_STOCKS
         active_category_name = "Lapis 2"
-        # Sembunyikan Opsi IDX secara cerdas
-        st.sidebar.info("✨ Mode Screener Lapis 2 secara otomatis menggunakan **Data Standar (0 Kuota)** agar tidak menghabiskan limit API harian Anda sekaligus.")
+        # Sembunyikan Opsi IDX secara otomatis agar kuota user tidak hangus tersedot 30 emiten sekaligus
+        st.sidebar.info("✨ Mode Screener Lapis 2 secara otomatis menggunakan **Data Standar (0 Kuota)** agar aman untuk API harian Anda.")
         use_idx_data = False
     else:
         active_stock_list = SHARIA_STOCKS
         active_category_name = "Lapis 1 (JII30)"
-        # Tampilkan Opsi Data untuk Lapis 1
+        # Tampilkan Opsi Data karena Lapis 1 punya cache di Supabase (Aman dari potong kuota massal)
         if user_role == 'free':
             st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Data Standar). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).") 
             use_idx_data = False
@@ -647,12 +587,12 @@ if mode == "🔍 Super Screener":
             use_idx_data = "Data IDX" in data_source
 
 elif mode == "📊 Advanced Chart":
-    # Advanced Chart SELALU memunculkan opsi sumber data (Karena pencarian per emiten)
+    # Advanced Chart SELALU memunculkan opsi sumber data (Karena pencarian aman, hanya 1 emiten per klik)
     if user_role == 'free':
         st.sidebar.info("🌐 Status Anda adalah FREE (Hanya akses Data Standar). Upgrade ke VIP/Pro untuk membuka Data Asing (IDX).") 
         use_idx_data = False
     else:
-        st.sidebar.caption("💡 Anda bisa menggunakan Data IDX untuk membedah bandar saham Lapis 1 maupun Lapis 2 di sini.")
+        st.sidebar.caption("💡 Anda bisa menggunakan Data IDX untuk membedah jejak bandar saham Lapis 1 maupun Lapis 2 di sini.")
         data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Potong Kuota)"]) 
         use_idx_data = "Data IDX" in data_source
 
