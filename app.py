@@ -100,7 +100,7 @@ def check_and_deduct_quota(cache_key):
         return False
     except: return False
 
-# --- 6. CSS FIX ---
+# --- 6. CSS FIX UNTUK LAYAR HP ---
 st.markdown("""
 <style>
     .stAppDeployButton {display:none;}
@@ -255,8 +255,9 @@ def score_analysis(df, fund_data):
     elif not pd.isna(curr.get('EMA200')) and curr['Close'] > curr['EMA200']:
         score_tech += 1; reasons.append("📈 Uptrend")
 
+    # PERBAIKAN LOGIKA RRG (Harus > IHSG dan Harus Plus/Gain)
     if 'Stock_Ret_20' in df.columns and 'IHSG_Ret_20' in df.columns:
-        if not pd.isna(curr['Stock_Ret_20']) and curr['Stock_Ret_20'] > curr['IHSG_Ret_20']:
+        if not pd.isna(curr['Stock_Ret_20']) and curr['Stock_Ret_20'] > curr['IHSG_Ret_20'] and curr['Stock_Ret_20'] > 0:
             score_tech += 1.5; reasons.append("🌟 IHSG")
         
     cmf = curr.get('CMF', 0)
@@ -292,12 +293,13 @@ def run_screener(use_idx_data, stock_list, category_name):
             **📊 Status Rekomendasi:**
             * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna (Uptrend kuat + Akumulasi).
             * ✅ **BUY** : Saham mulai menunjukkan tanda kebangkitan / pantulan.
+            * **WAIT** : Saham sedang jelek / berisiko tinggi. Lebih baik hindari.
             """)
         with c2:
             st.markdown("""
             **🔖 Arti Simbol Katalis (Pemicu Kenaikan):**
             * 🔥 **MA** : Harga sedang Uptrend.
-            * 🌟 **IHSG** : Saham berlari lebih kencang dari IHSG.
+            * 🌟 **IHSG** : Saham berlari lebih kencang dari IHSG (Return > 0).
             * 🐳 **CMF** : Deteksi suntikan dana raksasa.
             * 💎 **RSI** : Harga jatuh terlalu dalam (Diskon/Murah).
             * 🚀 **EPS** : Laba bersih bertumbuh > 10%.
@@ -437,8 +439,21 @@ def show_chart(use_idx_data):
         df = df[df['Volume'] > 0]
         df = calculate_metrics(df, ihsg_df)
         fund = get_fundamental_info(symbol)
+        
+        # Eksekusi Analisis untuk Status Rekomendasi
         s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
         wyckoff_phase, divergence = advanced_analysis(df)
+        total_score = s_tech + s_fund + s_bandar + s_candle
+        
+        # PENAMBAHAN FITUR: Status Rekomendasi di Advanced Chart
+        rec_status = "WAIT (Hindari / Pantau Saja)"
+        if total_score >= 6 or "BULLISH DIV" in divergence or "🔥 MA" in reasons: 
+            rec_status = "💎 STRONG BUY (Sangat Disarankan)"
+        elif total_score >= 4 or "Accumulation" in wyckoff_phase: 
+            rec_status = "✅ BUY (Boleh Cicil Beli)"
+            
+        st.info(f"💡 **Kesimpulan Sistem:** Saat ini saham **{ticker_only}** berada dalam status **{rec_status}**")
+        st.divider()
         
         idx_date = get_idx_target_date(df)
         cache_key = f"{ticker_only}_{idx_date}"
@@ -451,7 +466,6 @@ def show_chart(use_idx_data):
             else:
                 st.warning("⚠️ Kuota Harian API Anda Habis! Menggunakan Data Standar.")
             
-        st.divider()
         close, volume, atr = last['Close'], last['Volume'], last.get('ATR', 0)
         daily_turnover = close * volume
         stop_loss = close - (1.5 * atr) if atr > 0 else close
@@ -460,17 +474,17 @@ def show_chart(use_idx_data):
         # --- PERBAIKAN LOGIKA WARNA METRIK (UI PSIKOLOGI TRADING) ---
         c1, c2, c3, c4 = st.columns(4)
         
-        # 1. Logika Fase (Mode Normal: Positif Hijau, Negatif Merah)
+        # 1. Logika Fase (Streamlit normal mode: tanda '-' otomatis panah ke bawah & warna merah)
         if "Markdown" in wyckoff_phase or "Distribution" in wyckoff_phase:
             fase_color = "normal"  
-            fase_text = f"-{wyckoff_phase}" # Tanda minus otomatis memicu panah ke bawah & warna MERAH
+            fase_text = f"-{wyckoff_phase}" 
         else:
             fase_color = "normal"   
-            fase_text = wyckoff_phase # Tanpa minus otomatis panah ke atas & warna HIJAU
+            fase_text = wyckoff_phase 
             
         c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", fase_text, delta_color=fase_color)
         
-        # 2. Logika Target & Stop Loss (Netral / Abu-abu)
+        # 2. Logika Target & Stop Loss (Netral / Abu-abu agar objektif)
         tp_pct = ((target_profit - close) / close) * 100 if close > 0 else 0
         sl_pct = ((close - stop_loss) / close) * 100 if close > 0 else 0
         
@@ -478,7 +492,7 @@ def show_chart(use_idx_data):
             f"Target Profit (+{tp_pct:.1f}%)", 
             f"Rp {int(target_profit):,}", 
             f"Batas Rugi (SL): Rp {int(stop_loss):,} (-{sl_pct:.1f}%)", 
-            delta_color="off" # Di-off-kan (Abu-abu) agar psikologi user tetap objektif
+            delta_color="off" 
         )
         
         # 3. Metrik Asing
@@ -488,7 +502,7 @@ def show_chart(use_idx_data):
         else:
             c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Data Standar / Kuota Habis", delta_color="off") 
         
-        # 4. Metrik vs Pasar
+        # 4. Metrik vs Pasar (Koreksi RRG: Hanya bintang jika Return Positif)
         is_outperform = "🌟 IHSG" in " ".join(reasons)
         eps_g = fund.get('EPS_Growth') if fund else None
         if is_outperform:
