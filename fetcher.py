@@ -42,7 +42,6 @@ def get_ihsg_data():
         return ihsg[['Close']].rename(columns={'Close': 'IHSG_Close'})
     except: return pd.DataFrame()
 
-# 🧠 OTAK BARU: Ambil tanggal terakhir SELELAAH Ghost Row dibuang
 def get_idx_target_date(df):
     return df.index[-1].strftime('%Y-%m-%d')
 
@@ -60,36 +59,37 @@ for t in tickers:
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df.columns = [str(c).capitalize() for c in df.columns]
         df = df.loc[:, ~df.columns.duplicated()]
-        
-        # 🧹 ANTI-GHOST ROW: Tendang baris hari libur yang dipaksakan YFinance!
+
         df = df[df['Volume'] > 0]
-        
         if df.empty or len(df) < 50: continue
-        
+
         if df['Volume'].iloc[-1] < 5000000:
             print(f"⏩ SKIP {t}: Volume transaksi terlalu kecil")
             continue
-            
+
         target_date = get_idx_target_date(df)
-        
+
         df['Rsi'] = df.ta.rsi(length=14)
         df = pd.concat([df, df.ta.macd(fast=12, slow=26, signal=9), df.ta.bbands(length=20, std=2)], axis=1)
         df['SMA20'] = df.ta.sma(length=20); df['SMA50'] = df.ta.sma(length=50)
         df['SMA100'] = df.ta.sma(length=100); df['EMA200'] = df.ta.ema(length=200)
         df['ATR'] = df.ta.atr(length=14)
-        
-        ad = ((2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low'])) * df['Volume']
+
+        # --- PERBAIKAN BUG CMF ANTI-CRASH ---
+        high_low_diff = df['High'] - df['Low']
+        high_low_diff = high_low_diff.replace(0, 0.0001)
+        ad = ((2 * df['Close'] - df['High'] - df['Low']) / high_low_diff) * df['Volume']
         df['CMF'] = ad.fillna(0).rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
-        
+
         if not ihsg_df.empty:
             df = df.join(ihsg_df, how='left')
-            df['IHSG_Close'] = df['IHSG_Close'].ffill() 
+            df['IHSG_Close'] = df['IHSG_Close'].ffill()
             df['Stock_Ret_20'] = (df['Close'] - df['Close'].shift(20)) / df['Close'].shift(20)
             df['IHSG_Ret_20'] = (df['IHSG_Close'] - df['IHSG_Close'].shift(20)) / df['IHSG_Close'].shift(20)
 
         curr, prev = df.iloc[-1], df.iloc[-2]
         close, volume, atr = curr['Close'], curr['Volume'], curr.get('ATR', 0)
-        
+
         score = 0; reasons = []
         if curr['Close'] > curr.get('EMA200', 0): score += 1; reasons.append("📈 Uptrend")
         if curr.get('Stock_Ret_20', 0) > curr.get('IHSG_Ret_20', 0): score += 1.5; reasons.append("🌟 IHSG")
@@ -97,7 +97,7 @@ for t in tickers:
         if curr.get('Rsi', 50) < 35: score += 2; reasons.append("💎 RSI")
         s_candle, _ = check_candlestick_patterns(curr, prev)
         score += s_candle
-        
+
         wyckoff = "Sideways"
         if close > curr.get('SMA50', 0): wyckoff = "Markup" if close > curr.get('SMA20', 0) else "Distribution"
         else: wyckoff = "Markdown" if close < curr.get('SMA20', 0) else "Accumulation"
@@ -105,15 +105,14 @@ for t in tickers:
         rec = "WAIT"
         if score >= 4 or "Accumulation" in wyckoff: rec = "✅ BUY"
         if score >= 6: rec = "💎 STRONG BUY"
-        
+
         if score < 3 and "Accumulation" not in wyckoff:
             print(f"⏩ SKIP {t}: Skor teknikal jelek ({score})")
-            continue 
+            continue
 
-        # 4. TARIK DATA ASING
         symbol = t.replace(".JK", "")
         net_foreign, avg_buy_price, power_pct = 0, 0, 0
-        
+
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
         res_broker = requests.get(url_broker, headers={'accept': 'application/json', 'X-API-KEY': IDX_API_KEY})
         if res_broker.status_code == 200:
@@ -127,7 +126,7 @@ for t in tickers:
 
         if net_foreign <= 0:
             print(f"⏩ SKIP {t}: Asing jualan / distribusi (Rp {net_foreign})")
-            continue 
+            continue
 
         target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
         stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
@@ -150,10 +149,15 @@ for t in tickers:
 
 # --- 5. SIMPAN KE SUPABASE ---
 if results:
-    unique_dates = list(set([r['fetch_date'] for r in results]))
-    for d in unique_dates:
-        supabase.table('jii30_daily_data').delete().eq('fetch_date', d).execute()
-        
+    # --- PERBAIKAN FATAL: Sapu bersih seluruh tabel JII30 sebelum insert data baru ---
+    try:
+        # neq('id', 0) adalah trik untuk menghapus SELURUH baris di Supabase
+        supabase.table('jii30_daily_data').delete().neq('id', 0).execute()
+        print("🧹 Database lama berhasil dibersihkan.")
+    except Exception as e:
+        print(f"Gagal membersihkan database: {e}")
+
+    # Insert data pemenang hari ini
     supabase.table('jii30_daily_data').insert(results).execute()
     print(f"[{datetime.utcnow()}] 🎉 Sukses menyimpan {len(results)} saham ke Database!")
 else:
