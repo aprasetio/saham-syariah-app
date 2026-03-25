@@ -100,7 +100,7 @@ def check_and_deduct_quota(cache_key):
         return False
     except: return False
 
-# --- 6. CSS FIX & KAMUS GLOBAL ---
+# --- 6. CSS FIX ---
 st.markdown("""
 <style>
     .stAppDeployButton {display:none;}
@@ -124,41 +124,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# Fungsi Kamus Global agar bisa dipanggil di mana saja
-def show_dictionary():
-    with st.expander("📖 Kamus Pintar & Panduan Aplikasi (Klik untuk membuka)"):
-        st.info("💡 **Tips:** Kombinasi Katalis yang banyak (contoh: 🔥🌟🐳) menandakan probabilitas kenaikan harga yang lebih tinggi.")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("""
-            **⚡ Membaca Power Asing (% Dominasi):**
-            * **< 5% (Lemah)** : Asing tidak peduli. Digerakkan lokal.
-            * **5% - 15% (Sedang)** : Mulai ada ketertarikan Asing.
-            * **15% - 30% (Kuat)** : Asing bertindak sebagai *Market Maker*.
-            * **> 30% (Sangat Kuat)** : Saham diborong brutal oleh Asing.
-            
-            **📊 Status Rekomendasi:**
-            * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna.
-            * ✅ **BUY** : Saham mulai menunjukkan pantulan.
-            
-            **🎯 Rahasia Target Profit (TP) & Stop Loss (SL):**
-            Aplikasi ini menggunakan teknologi **ATR (Average True Range)**. Jika saham bergerak liar, jarak SL/TP otomatis melebar agar Anda tidak tersapu pergerakan harga palsu. Kami mengunci Rasio Risiko 1:2.
-            """)
-        with c2:
-            st.markdown("""
-            **🔖 Arti Simbol Katalis:**
-            * 🔥 **MA (Moving Average)** : Harga sedang Uptrend.
-            * 🌟 **IHSG (Outperform)** : Saham berlari lebih kencang dari IHSG.
-            * 🐳 **CMF (Money Flow)** : Deteksi suntikan dana raksasa.
-            * 💎 **RSI (Oversold)** : Harga jatuh terlalu dalam (Diskon).
-            * 🚀 **EPS (Earning)** : Laba bersih bertumbuh > 10%.
-            * 🕯️ **Pola (Candlestick)** : Muncul pola pantulan di grafik.
-            
-            **🏢 Kategori Saham:**
-            * 👑 **Lapis 1 (JII30)**: Saham *Bluechip* besar (ADRO, ASII, BBCA, dll).
-            * 🚀 **Lapis 2 (Mid-Caps)**: Saham gesit *gain* tinggi (BRMS, SIDO, dll).
-            """)
 
 # --- 7. DAFTAR SAHAM (Lapis 1 & 2) ---
 SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
@@ -312,8 +277,36 @@ def score_analysis(df, fund_data):
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
     
-    # Memanggil Kamus Edukasi Global
-    show_dictionary()
+    # KAMUS KHUSUS SCREENER
+    with st.expander("📖 Panduan Membaca Hasil Screener (Klik di sini)"):
+        st.info("💡 **Tips:** Kombinasi Katalis yang banyak (contoh: 🔥🌟🐳) menandakan probabilitas kenaikan harga yang lebih tinggi.")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            **⚡ Membaca Power Asing (% Dominasi):**
+            * **< 5% (Lemah)** : Asing tidak peduli. Digerakkan bandar lokal.
+            * **5% - 15% (Sedang)** : Mulai ada ketertarikan Asing.
+            * **15% - 30% (Kuat)** : Asing bertindak sebagai *Market Maker*.
+            * **> 30% (Sangat Kuat)** : Saham diborong brutal oleh Asing.
+            
+            **📊 Status Rekomendasi:**
+            * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna (Uptrend kuat + Akumulasi).
+            * ✅ **BUY** : Saham mulai menunjukkan tanda kebangkitan / pantulan.
+            """)
+        with c2:
+            st.markdown("""
+            **🔖 Arti Simbol Katalis (Pemicu Kenaikan):**
+            * 🔥 **MA** : Harga sedang Uptrend.
+            * 🌟 **IHSG** : Saham berlari lebih kencang dari IHSG.
+            * 🐳 **CMF** : Deteksi suntikan dana raksasa.
+            * 💎 **RSI** : Harga jatuh terlalu dalam (Diskon/Murah).
+            * 🚀 **EPS** : Laba bersih bertumbuh > 10%.
+            * 🕯️ **Pola** : Muncul pola candlestick pantulan.
+            
+            **🏢 Kategori Saham:**
+            * 👑 **Lapis 1 (JII30)**: Saham *Bluechip* besar & stabil.
+            * 🚀 **Lapis 2 (Mid-Caps)**: Saham gesit berpotensi *gain* tinggi.
+            """)
 
     if st.button("MULAI SCANNING"):
         # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 + Data IDX)
@@ -398,8 +391,25 @@ def run_screener(use_idx_data, stock_list, category_name):
 def show_chart(use_idx_data):
     st.header("📊 Deep Analysis & Target Tracker")
     
-    # Memanggil Kamus Edukasi Global (Kini muncul juga di Chart!)
-    show_dictionary()
+    # KAMUS KHUSUS CHART & GRAFIK
+    with st.expander("📖 Panduan Membaca Fase & Grafik (Klik di sini)"):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            **Siklus Pergerakan Harga Bandar (Wyckoff Phase):**
+            1. 🟢 **Accumulation (Akumulasi):** Harga mendatar di bawah. Bandar mengumpulkan barang. *(Waktu terbaik cicil beli)*.
+            2. 🔵 **Markup (Fase Naik):** Harga terbang. Uptrend kuat. *(Fase nikmat tahan untung)*.
+            3. 🔴 **Distribution (Distribusi):** Harga tertahan di pucuk. Bandar mulai jualan. *(Waspada)*.
+            4. 🟠 **Markdown (Fase Turun):** Bandar keluar, harga jatuh bebas. *(Hindari saham ini)*.
+            """)
+        with c2:
+            st.markdown("""
+            **🎯 Target Profit (TP) & Stop Loss (SL) ATR:**
+            Aplikasi ini menggunakan teknologi **ATR (Average True Range)**. Jarak TP/SL otomatis melebar saat saham bergerak liar agar Anda tidak tersapu pergerakan harga palsu (*whipsaw*).
+            
+            **🐳 Garis Biru Putus-Putus (Modal Asing):**
+            Jika Anda mengecek grafik menggunakan **Data IDX**, akan muncul garis biru yang menunjukkan letak pertahanan harga modal rata-rata Asing hari ini.
+            """)
     st.divider()
 
     with st.form(key='chart_search_form'):
@@ -453,10 +463,10 @@ def show_chart(use_idx_data):
         # 1. Logika Fase (Mode Normal: Positif Hijau, Negatif Merah)
         if "Markdown" in wyckoff_phase or "Distribution" in wyckoff_phase:
             fase_color = "normal"  
-            fase_text = f"-{wyckoff_phase}" # Tanda minus otomatis membuat panah ke bawah (Merah)
+            fase_text = f"-{wyckoff_phase}" # Tanda minus otomatis memicu panah ke bawah & warna MERAH
         else:
             fase_color = "normal"   
-            fase_text = wyckoff_phase # Tanpa minus otomatis panah ke atas (Hijau)
+            fase_text = wyckoff_phase # Tanpa minus otomatis panah ke atas & warna HIJAU
             
         c1.metric("Harga Terakhir & Fase", f"Rp {int(close):,}", fase_text, delta_color=fase_color)
         
@@ -468,7 +478,7 @@ def show_chart(use_idx_data):
             f"Target Profit (+{tp_pct:.1f}%)", 
             f"Rp {int(target_profit):,}", 
             f"Batas Rugi (SL): Rp {int(stop_loss):,} (-{sl_pct:.1f}%)", 
-            delta_color="off" # Di-off-kan (Abu-abu) agar psikologi user tetap objektif melihat batas cut loss
+            delta_color="off" # Di-off-kan (Abu-abu) agar psikologi user tetap objektif
         )
         
         # 3. Metrik Asing
@@ -486,7 +496,7 @@ def show_chart(use_idx_data):
             pasar_text = "🌟 MENGALAHKAN IHSG"
         else:
             pasar_color = "normal"
-            pasar_text = "-📉 UNDERPERFORM" # Tanda minus untuk memicu panah ke bawah (Merah)
+            pasar_text = "-📉 UNDERPERFORM" # Tanda minus memicu panah ke bawah & warna MERAH
             
         c4.metric("Status vs Pasar", pasar_text, f"Laba: +{eps_g*100:.1f}%" if eps_g and eps_g > 0 else "Laba: N/A", delta_color=pasar_color)
         
