@@ -326,20 +326,33 @@ def show_dividend_hunter(stock_list, category_name):
             progress.progress((i+1)/len(tickers))
             try:
                 info = yf.Ticker(t).info
-                div_yield = info.get('dividendYield', 0)
+                
+                # --- PERBAIKAN BUG DATA YAHOO FINANCE ---
+                div_rate = info.get('dividendRate', 0)     # Total dividen dlm Rupiah
+                price = info.get('previousClose', 1)       # Harga penutupan kemarin
+                div_yield_raw = info.get('dividendYield', 0) 
                 ex_date_ts = info.get('exDividendDate', None)
                 
-                # Hanya ambil yang punya yield > 0
-                if div_yield and div_yield > 0:
+                # Hitung manual (Rupiah / Harga * 100) agar tidak tertipu persentase error YF
+                if pd.notna(div_rate) and div_rate > 0 and pd.notna(price) and price > 0:
+                    calculated_yield = (div_rate / price) * 100
+                elif pd.notna(div_yield_raw) and div_yield_raw > 0:
+                    # Jika data rupiah kosong, terpaksa pakai persentase raw YF
+                    calculated_yield = (div_yield_raw * 100) if div_yield_raw < 1 else div_yield_raw
+                else:
+                    calculated_yield = 0
+                
+                # FILTER LOGIKA: Tidak mungkin ada dividen IHSG > 40%. Jika lebih, itu pasti data sampah.
+                if calculated_yield > 0 and calculated_yield <= 40:
                     ex_date_str = "Belum Diumumkan"
                     if ex_date_ts:
-                        # Konversi Unix Timestamp ke Tanggal yang bisa dibaca
+                        # Konversi dari Unix Timestamp ke YYYY-MM-DD
                         ex_date_str = datetime.utcfromtimestamp(ex_date_ts).strftime('%Y-%m-%d')
                         
                     results.append({
                         "Kode": t.replace(".JK", ""),
-                        "Harga": int(info.get('previousClose', 0)),
-                        "Yield (%)": round(div_yield * 100, 2),
+                        "Harga": int(price),
+                        "Yield (%)": round(calculated_yield, 2),
                         "Ex-Date": ex_date_str
                     })
             except: continue
@@ -348,8 +361,8 @@ def show_dividend_hunter(stock_list, category_name):
         
         if results:
             df_div = pd.DataFrame(results)
-            df_div = df_div.sort_values(by="Yield (%)", ascending=False) # Urutkan dari bunga terbesar
-            st.success(f"✅ Selesai! Menemukan {len(results)} saham pembagi dividen.")
+            df_div = df_div.sort_values(by="Yield (%)", ascending=False) 
+            st.success(f"✅ Selesai! Menemukan {len(results)} saham dengan data dividen valid.")
             
             st.dataframe(df_div, use_container_width=True, hide_index=True,
                 column_config={
@@ -360,8 +373,7 @@ def show_dividend_hunter(stock_list, category_name):
                 }
             )
         else:
-            st.info("Belum ada data dividen yang tercatat/diumumkan untuk kategori ini.")
-
+            st.info("Belum ada data dividen yang masuk akal / tercatat untuk kategori ini hari ini.")
 # --- 11. FITUR SCREENER ---
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
