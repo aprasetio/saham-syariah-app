@@ -75,7 +75,12 @@ for t in tickers:
         df['SMA100'] = df.ta.sma(length=100); df['EMA200'] = df.ta.ema(length=200)
         df['ATR'] = df.ta.atr(length=14)
 
-        # --- PERBAIKAN BUG CMF ANTI-CRASH ---
+        # --- TAHAP 1: DONCHIAN CHANNELS (20 Hari) ---
+        donchian = df.ta.donchian(lower_length=20, upper_length=20)
+        if donchian is not None:
+            df = pd.concat([df, donchian], axis=1)
+        # --------------------------------------------
+
         high_low_diff = df['High'] - df['Low']
         high_low_diff = high_low_diff.replace(0, 0.0001)
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / high_low_diff) * df['Volume']
@@ -95,6 +100,15 @@ for t in tickers:
         if curr.get('Stock_Ret_20', 0) > curr.get('IHSG_Ret_20', 0): score += 1.5; reasons.append("🌟 IHSG")
         if curr.get('CMF', 0) > 0.1: score += 2; reasons.append("🐳 CMF")
         if curr.get('Rsi', 50) < 35: score += 2; reasons.append("💎 RSI")
+        
+        # --- TAHAP 1: SKOR BREAKOUT DONCHIAN ---
+        dcu = curr.get('DCU_20_20', 0)
+        if pd.notna(dcu) and dcu > 0:
+            # Jika harga hari ini sangat dekat (99%) atau menembus Garis Atas Donchian
+            if curr['Close'] >= (dcu * 0.99):
+                score += 1.5; reasons.append("🚀 Breakout DC")
+        # ---------------------------------------
+        
         s_candle, _ = check_candlestick_patterns(curr, prev)
         score += s_candle
 
@@ -143,21 +157,18 @@ for t in tickers:
             "status": rec,
             "katalis": ", ".join(reasons)
         })
-        print(f"✅ LOLOS: {symbol} (Tgl: {target_date})")
+        print(f"✅ LOLOS: {symbol} (Tgl: {target_date}) | Alasan: {', '.join(reasons)}")
     except Exception as e:
         print(f"❌ Error {t}: {e}")
 
 # --- 5. SIMPAN KE SUPABASE ---
 if results:
-    # --- PERBAIKAN FATAL: Sapu bersih seluruh tabel JII30 sebelum insert data baru ---
     try:
-        # neq('id', 0) adalah trik untuk menghapus SELURUH baris di Supabase
         supabase.table('jii30_daily_data').delete().neq('id', 0).execute()
         print("🧹 Database lama berhasil dibersihkan.")
     except Exception as e:
         print(f"Gagal membersihkan database: {e}")
 
-    # Insert data pemenang hari ini
     supabase.table('jii30_daily_data').insert(results).execute()
     print(f"[{datetime.utcnow()}] 🎉 Sukses menyimpan {len(results)} saham ke Database!")
 else:
