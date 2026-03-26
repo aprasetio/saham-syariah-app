@@ -1,7 +1,8 @@
 streamlit
+yfinance
 pandas
 pandas-ta
 plotly
 requests
 supabase
-yfinance
+scikit-learn
