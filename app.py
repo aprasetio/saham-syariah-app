@@ -540,18 +540,23 @@ def show_chart(use_idx_data):
         with c1:
             st.markdown("""
             **Fase Bandar (Wyckoff):**
-            1. 🟢 **Accumulation:** Harga mendatar di bawah. Waktunya cicil beli.
-            2. 🔵 **Markup:** Harga terbang. Uptrend kuat.
-            3. 🔴 **Distribution:** Harga tertahan di pucuk. Bandar jualan.
-            4. 🟠 **Markdown:** Bandar jatuh.
+            * 🟢 **Accumulation:** Harga mendatar di bawah. Waktunya cicil beli.
+            * 🔵 **Markup:** Harga terbang. Uptrend kuat.
+            * 🔴 **Distribution:** Harga tertahan di pucuk. Bandar jualan.
+            * 🟠 **Markdown:** Bandar keluar, harga jatuh.
             
-            *(💡 **Catatan Penting:** Fase "Accumulation" bisa terjadi bersamaan dengan indikator CMF yang Merah/Distribusi. Ini normal! Artinya harga saham sudah di dasar harga, namun mayoritas trader lokal masih panik jualan (CMF Merah), sementara Bandar mulai menampung).*
+            *(💡 **Catatan:** Fase "Accumulation" bisa terjadi bersamaan dengan indikator CMF yang Merah/Distribusi. Ini wajar! Artinya harga saham sudah di dasar, ritel panik jualan, tapi Bandar mulai menampung).*
             """)
         with c2:
             st.markdown("""
-            **🤖 Live AI Predictor (KNN):** Algoritma *Machine Learning* yang membandingkan pola harga hari ini dengan pola historis di masa lalu untuk menghitung probabilitas harga besok.
+            **🤖 Live AI Predictor (KNN):**
+            Memprediksi peluang harga NAIK untuk besok berdasarkan sejarah:
+            * 🔥 **> 70% (Bullish):** Peluang naik sangat tinggi.
+            * ⚖️ **50% - 69% (Netral):** Pergerakan arah belum pasti.
+            * ❄️ **< 50% (Bearish):** Peluang naik rendah (Rawan turun).
+
             **🎯 Target & Stop Loss:** Menggunakan sistem volatilitas ATR.
-            **🟩/🟥 Lorong Donchian:** Garis putus-putus merah dan hijau di grafik adalah batas rekor harga 20 hari terakhir. Jika harga menembus atap hijau, itu adalah sinyal **BREAKOUT**!
+            **🟩/🟥 Lorong Donchian:** Garis putus-putus merah/hijau. Jika harga menembus atap hijau = **BREAKOUT**!
             """)
     st.divider()
 
@@ -657,9 +662,16 @@ def show_chart(use_idx_data):
             c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Standar / Kuota Habis", delta_color="off")
             
         # FITUR TAHAP 5: Menampilkan Hasil AI di Kotak ke-4
-        ai_status = "🔥 Sinyal Bullish" if prob_up >= 0.7 else ("❄️ Sinyal Bearish" if prob_up < 0.5 else "⚖️ Netral")
-        ai_color = "normal" if prob_up >= 0.5 else "inverse"
-        
+        if prob_up >= 0.7:
+            ai_status = "🔥 Sinyal Bullish"
+            ai_color = "normal"  # Positif -> Panah Atas Hijau
+        elif prob_up < 0.5:
+            ai_status = "-❄️ Sinyal Bearish"  # Tambah MINUS agar panah ke BAWAH
+            ai_color = "normal"  # Negatif -> Panah Bawah Merah
+        else:
+            ai_status = "⚖️ Netral"
+            ai_color = "off"  # Abu-abu, tanpa panah
+            
         c4.metric(f"🤖 AI Predictor (Besok)", f"{int(prob_up*100)}% NAIK", ai_status, delta_color=ai_color)
         
         # VISUALISASI GRAFIK
