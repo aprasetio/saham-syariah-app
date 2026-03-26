@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
@@ -45,13 +46,13 @@ def get_ihsg_data():
 def get_idx_target_date(df):
     return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 3. PROSES UTAMA SCREENING ---
-print(f"[{datetime.utcnow()}] 🚀 Memulai Auto-Screening JII30...")
+# --- 3. TAHAP 1 & 2: PENGUMPULAN DATA & KALKULASI QUANTITATIVE ---
+print(f"[{datetime.utcnow()}] 🚀 Memulai Auto-Screening & Quant Ranking JII30...")
 ihsg_df = get_ihsg_data()
 tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
 price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
 
-results = []
+raw_data_list = []
 
 for t in tickers:
     try:
@@ -64,7 +65,7 @@ for t in tickers:
         if df.empty or len(df) < 50: continue
 
         if df['Volume'].iloc[-1] < 5000000:
-            print(f"⏩ SKIP {t}: Volume transaksi terlalu kecil")
+            print(f"⏩ SKIP {t}: Volume terlalu kecil")
             continue
 
         target_date = get_idx_target_date(df)
@@ -75,11 +76,9 @@ for t in tickers:
         df['SMA100'] = df.ta.sma(length=100); df['EMA200'] = df.ta.ema(length=200)
         df['ATR'] = df.ta.atr(length=14)
 
-        # --- TAHAP 1: DONCHIAN CHANNELS (20 Hari) ---
+        # Indikator Tahap 1: Donchian Channels
         donchian = df.ta.donchian(lower_length=20, upper_length=20)
-        if donchian is not None:
-            df = pd.concat([df, donchian], axis=1)
-        # --------------------------------------------
+        if donchian is not None: df = pd.concat([df, donchian], axis=1)
 
         high_low_diff = df['High'] - df['Low']
         high_low_diff = high_low_diff.replace(0, 0.0001)
@@ -95,19 +94,17 @@ for t in tickers:
         curr, prev = df.iloc[-1], df.iloc[-2]
         close, volume, atr = curr['Close'], curr['Volume'], curr.get('ATR', 0)
 
+        # --- Skor Teknikal Dasar ---
         score = 0; reasons = []
         if curr['Close'] > curr.get('EMA200', 0): score += 1; reasons.append("📈 Uptrend")
         if curr.get('Stock_Ret_20', 0) > curr.get('IHSG_Ret_20', 0): score += 1.5; reasons.append("🌟 IHSG")
         if curr.get('CMF', 0) > 0.1: score += 2; reasons.append("🐳 CMF")
         if curr.get('Rsi', 50) < 35: score += 2; reasons.append("💎 RSI")
         
-        # --- TAHAP 1: SKOR BREAKOUT DONCHIAN ---
+        # Sinyal Tahap 1: Breakout Donchian
         dcu = curr.get('DCU_20_20', 0)
-        if pd.notna(dcu) and dcu > 0:
-            # Jika harga hari ini sangat dekat (99%) atau menembus Garis Atas Donchian
-            if curr['Close'] >= (dcu * 0.99):
-                score += 1.5; reasons.append("🚀 Breakout DC")
-        # ---------------------------------------
+        if pd.notna(dcu) and dcu > 0 and curr['Close'] >= (dcu * 0.99):
+            score += 1.5; reasons.append("🚀 Breakout DC")
         
         s_candle, _ = check_candlestick_patterns(curr, prev)
         score += s_candle
@@ -116,15 +113,69 @@ for t in tickers:
         if close > curr.get('SMA50', 0): wyckoff = "Markup" if close > curr.get('SMA20', 0) else "Distribution"
         else: wyckoff = "Markdown" if close < curr.get('SMA20', 0) else "Accumulation"
 
+        # --- TAHAP 2: KALKULASI METRIK QUANTITATIVE (MOMENTUM, VOLATILITY, VALUE) ---
+        try:
+            # Momentum 6 Bulan (125 Hari Bursa) & Volatilitas Disetahunkan
+            if len(df) >= 125:
+                mom_6m = (curr['Close'] / df['Close'].iloc[-125]) - 1
+                vol_6m = df['Close'].pct_change().tail(125).std() * np.sqrt(252)
+            else:
+                mom_6m = 0; vol_6m = 999
+        except: mom_6m = 0; vol_6m = 999
+
+        try:
+            # Book-to-Price Ratio (Value Strategy)
+            info = yf.Ticker(t).info
+            pbv = info.get('priceToBook', 0)
+            bp_ratio = (1 / pbv) if (pd.notna(pbv) and pbv > 0) else 0
+        except: bp_ratio = 0
+
+        # Simpan ke daftar tunggu untuk di-ranking secara massal
+        raw_data_list.append({
+            'ticker': t, 'symbol': t.replace(".JK", ""), 'close': close, 'volume': volume, 
+            'atr': atr, 'target_date': target_date, 'wyckoff': wyckoff, 
+            'base_score': score, 'reasons': reasons, 
+            'mom_6m': mom_6m, 'vol_6m': vol_6m, 'bp_ratio': bp_ratio
+        })
+    except Exception as e:
+        print(f"❌ Error Fetching {t}: {e}")
+
+# --- 4. TAHAP 2: CROSS-SECTIONAL RANKING & FINALISASI ---
+results = []
+if raw_data_list:
+    print("📊 Menjalankan Cross-Sectional Ranking...")
+    df_quant = pd.DataFrame(raw_data_list)
+    
+    # Memberi Peringkat (Persentil 0.0 - 1.0)
+    df_quant['mom_rank'] = df_quant['mom_6m'].rank(pct=True)
+    df_quant['vol_rank'] = df_quant['vol_6m'].rank(ascending=False, pct=True) # Ascending False krn kita cari yg paling KECIL volatilitasnya
+    df_quant['bp_rank'] = df_quant['bp_ratio'].rank(pct=True)
+
+    for index, row in df_quant.iterrows():
+        symbol = row['symbol']
+        final_score = row['base_score']
+        reasons = row['reasons'].copy()
+        
+        # Injeksi Poin Multifaktor (Hanya untuk Top 20% Saham JII30 / Peringkat 1-6 Terbaik)
+        if row['mom_rank'] >= 0.8:
+            final_score += 1.5; reasons.append("🔥 Top Momentum")
+        if row['vol_rank'] >= 0.8:
+            final_score += 1.0; reasons.append("🛡️ Low Volatility")
+        if row['bp_rank'] >= 0.8:
+            final_score += 1.5; reasons.append("💰 Undervalued (Value)")
+
+        wyckoff = row['wyckoff']
         rec = "WAIT"
-        if score >= 4 or "Accumulation" in wyckoff: rec = "✅ BUY"
-        if score >= 6: rec = "💎 STRONG BUY"
+        # Ambang batas kita naikkan sedikit karena total poin maksimal sekarang lebih tinggi
+        if final_score >= 4.5 or "Accumulation" in wyckoff: rec = "✅ BUY"
+        if final_score >= 7.5: rec = "💎 STRONG BUY"
 
-        if score < 3 and "Accumulation" not in wyckoff:
-            print(f"⏩ SKIP {t}: Skor teknikal jelek ({score})")
-            continue
+        if final_score < 3.5 and "Accumulation" not in wyckoff:
+            continue # Abaikan saham jelek, hemat kuota API Broker
 
-        symbol = t.replace(".JK", "")
+        # Tarik Data Broker Asing (Hanya untuk saham yang lolos filter)
+        target_date = row['target_date']
+        close, volume, atr = row['close'], row['volume'], row['atr']
         net_foreign, avg_buy_price, power_pct = 0, 0, 0
 
         url_broker = f"https://api.goapi.io/stock/idx/{symbol}/broker_summary?date={target_date}&investor=FOREIGN"
@@ -139,7 +190,6 @@ for t in tickers:
             if (close * volume) > 0: power_pct = (abs(net_foreign) / (close * volume)) * 100
 
         if net_foreign <= 0:
-            print(f"⏩ SKIP {t}: Asing jualan / distribusi (Rp {net_foreign})")
             continue
 
         target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
@@ -157,9 +207,7 @@ for t in tickers:
             "status": rec,
             "katalis": ", ".join(reasons)
         })
-        print(f"✅ LOLOS: {symbol} (Tgl: {target_date}) | Alasan: {', '.join(reasons)}")
-    except Exception as e:
-        print(f"❌ Error {t}: {e}")
+        print(f"✅ LOLOS QUANT: {symbol} | Katalis: {', '.join(reasons)}")
 
 # --- 5. SIMPAN KE SUPABASE ---
 if results:
@@ -170,6 +218,6 @@ if results:
         print(f"Gagal membersihkan database: {e}")
 
     supabase.table('jii30_daily_data').insert(results).execute()
-    print(f"[{datetime.utcnow()}] 🎉 Sukses menyimpan {len(results)} saham ke Database!")
+    print(f"[{datetime.utcnow()}] 🎉 Sukses menyimpan {len(results)} saham Juara ke Database!")
 else:
-    print(f"[{datetime.utcnow()}] ⚠️ Tidak ada saham yang lolos kriteria.")
+    print(f"[{datetime.utcnow()}] ⚠️ Tidak ada saham yang lolos uji Kuanta hari ini.")
