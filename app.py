@@ -288,26 +288,28 @@ def score_analysis(df, fund_data):
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
 
 # --- 10. FITUR BARU: DIVIDEND HUNTER (KALENDER DIVIDEN) ---
+# --- 10. FITUR BARU: DIVIDEND HUNTER (KALENDER DIVIDEN) ---
 def show_dividend_hunter(stock_list, category_name):
     st.header(f"📅 Dividend Hunter ({category_name})")
     
-    with st.expander("📖 Panduan Wajib Dividen: Cum-Date vs Ex-Date (Klik untuk buka)"):
+    with st.expander("📖 Panduan Wajib: Hindari Dividend Trap! (Klik di sini)"):
         st.markdown("""
-        Jangan sampai salah tanggal! Ini adalah aturan emas berburu dividen:
-        * 🟢 **Cum-Date (Cumulative Date):** Hari TERAKHIR Anda wajib membeli/memiliki saham agar nama Anda tercatat sebagai penerima dividen.
-        * 🔴 **Ex-Date (Expired Date):** Hari di mana hak dividen sudah **hangus**. Jika Anda baru beli di hari ini, Anda **TIDAK** dapat dividen.
-        * 💡 **Strategi Rahasia:** Jika Anda sudah membeli sejak *Cum-Date*, Anda BOLEH langsung menjual saham Anda di pagi hari saat *Ex-Date*. Anda tetap akan menerima uang dividennya!
+        **Aturan Emas Berburu Dividen:**
+        1. 🟢 **Beli di Titik Terendah (Accumulation Window):** Jangan beli saham seminggu sebelum jadwal dividen saat harga sedang di pucuk! Gunakan grafik di bawah untuk mencari titik harga terendah (Support) beberapa bulan sebelum jadwal pembagian dividen.
+        2. 🟢 **Cum-Date (Cumulative Date):** Hari TERAKHIR Anda wajib membeli/memiliki saham agar nama Anda tercatat sebagai penerima dividen.
+        3. 🔴 **Ex-Date (Expired Date):** Hari di mana hak dividen **hangus** dan harga saham biasanya **DIBANTING TURUN (Dividend Trap)**. Jika Anda sudah beli sejak Cum-Date, Anda boleh menjual saham di pagi hari saat Ex-Date dan tetap mendapat dividennya!
         """)
         
     # ETALASE UNTUK USER FREE (Freemium Upsell)
     if user_role == 'free':
         st.warning("🔒 **Fitur Eksklusif VIP/Pro Terkunci**")
-        st.info("Upgrade ke VIP/Pro untuk membuka *scanner* dividen *real-time*. Temukan saham yang memberikan keuntungan dividen jauh di atas bunga deposito bank, lengkap dengan tanggal Ex-Date-nya!")
+        st.info("Upgrade ke VIP/Pro untuk membuka *scanner* dividen, mencari saham dengan bunga di atas deposito, dan mengakses grafik histori harga untuk membeli di titik terendah!")
         
         st.markdown("**Preview Fitur (Data Ilustrasi):**")
         dummy_data = pd.DataFrame({
             "Kode": ["PTBA", "ITMG", "ADRO", "🔒", "🔒"],
             "Harga": ["Rp 2,800", "Rp 26,000", "Rp 2,700", "🔒 VIP", "🔒 VIP"],
+            "Support Terendah": ["Rp 2,300", "Rp 23,000", "Rp 2,100", "🔒 VIP", "🔒 VIP"],
             "Yield (Bunga)": ["15.2%", "12.5%", "10.1%", "🔒 VIP", "🔒 VIP"],
             "Ex-Date": ["Segera Datang", "Segera Datang", "Segera Datang", "🔒 VIP", "🔒 VIP"]
         })
@@ -327,13 +329,12 @@ def show_dividend_hunter(stock_list, category_name):
             try:
                 info = yf.Ticker(t).info
                 
-                # --- PERBAIKAN BUG DATA YAHOO FINANCE ---
-                div_rate = info.get('dividendRate', 0)     # Total dividen dlm Rupiah
-                price = info.get('previousClose', 1)       # Harga penutupan kemarin
+                div_rate = info.get('dividendRate', 0)     
+                price = info.get('previousClose', 1)       
                 div_yield_raw = info.get('dividendYield', 0) 
                 ex_date_ts = info.get('exDividendDate', None)
+                low_52w = info.get('fiftyTwoWeekLow', 0) # FITUR BARU: Ambil harga terendah setahun
                 
-                # Hitung manual (Rupiah / Harga * 100) agar tidak tertipu persentase error YF
                 if pd.notna(div_rate) and div_rate > 0 and pd.notna(price) and price > 0:
                     calculated_yield = (div_rate / price) * 100
                 elif pd.notna(div_yield_raw) and div_yield_raw > 0:
@@ -341,7 +342,6 @@ def show_dividend_hunter(stock_list, category_name):
                 else:
                     calculated_yield = 0
                 
-                # FILTER LOGIKA: Tidak mungkin ada dividen IHSG > 40%. Jika lebih, buang (data sampah).
                 if calculated_yield > 0 and calculated_yield <= 40:
                     ex_date_str = "Belum Diumumkan"
                     if ex_date_ts:
@@ -350,6 +350,7 @@ def show_dividend_hunter(stock_list, category_name):
                     results.append({
                         "Kode": t.replace(".JK", ""),
                         "Harga": int(price),
+                        "Support 1Y": int(low_52w),
                         "Yield (%)": round(calculated_yield, 2),
                         "Ex-Date": ex_date_str
                     })
@@ -360,20 +361,71 @@ def show_dividend_hunter(stock_list, category_name):
         if results:
             df_div = pd.DataFrame(results)
             df_div = df_div.sort_values(by="Yield (%)", ascending=False) 
+            # Simpan dataframe ke session state agar tidak hilang saat user pilih grafik
+            st.session_state['div_results'] = df_div 
             st.success(f"✅ Selesai! Menemukan {len(results)} saham dengan data dividen valid.")
-            
-            st.dataframe(df_div, use_container_width=True, hide_index=True,
-                column_config={
-                    "Kode": st.column_config.TextColumn(width="small"),
-                    "Harga": st.column_config.NumberColumn(format="Rp %d"),
-                    "Yield (%)": st.column_config.NumberColumn(format="%.2f %%"),
-                    "Ex-Date": st.column_config.TextColumn(width="medium")
-                }
-            )
         else:
             st.info("Belum ada data dividen yang masuk akal / tercatat untuk kategori ini hari ini.")
+            st.session_state['div_results'] = None
 
-
+    # TAMPILAN TABEL & GRAFIK (Jika data sudah tersimpan di session state)
+    if 'div_results' in st.session_state and st.session_state['div_results'] is not None:
+        df_div = st.session_state['div_results']
+        
+        # 1. Tampilkan Tabel
+        st.dataframe(df_div, use_container_width=True, hide_index=True,
+            column_config={
+                "Kode": st.column_config.TextColumn(width="small"),
+                "Harga": st.column_config.NumberColumn(format="Rp %d"),
+                "Support 1Y": st.column_config.NumberColumn(format="Rp %d"),
+                "Yield (%)": st.column_config.NumberColumn(format="%.2f %%"),
+                "Ex-Date": st.column_config.TextColumn(width="medium")
+            }
+        )
+        
+        # 2. Fitur Baru: Grafik Historis Pencari Support
+        st.divider()
+        st.subheader("📉 Analisis Titik Beli Terendah (Historical Chart)")
+        st.caption("Gunakan fitur ini untuk melihat apakah harga saham saat ini sedang berada di pucuk yang berbahaya, atau sedang di harga bawah yang aman untuk dicicil.")
+        
+        selected_div_stock = st.selectbox("Pilih saham dari daftar di atas untuk dianalisis:", df_div['Kode'].tolist())
+        
+        if selected_div_stock:
+            with st.spinner("Menggambar grafik..."):
+                symbol_chart = f"{selected_div_stock}.JK"
+                df_hist = yf.download(symbol_chart, period="1y", auto_adjust=True, progress=False)
+                
+                if not df_hist.empty:
+                    df_hist = fix_dataframe(df_hist)
+                    current_price = df_hist['Close'].iloc[-1]
+                    lowest_price = df_hist['Low'].min()
+                    
+                    fig = go.Figure()
+                    
+                    # Garis pergerakan harga
+                    fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Close'], mode='lines', name='Harga', line=dict(color='#2E86C1', width=2)))
+                    
+                    # Garis batas bawah (Support 1 Tahun)
+                    fig.add_hline(y=lowest_price, line_dash="dash", line_color="green", annotation_text=f"Support Terkuat 1 Tahun (Rp {int(lowest_price):,})", annotation_position="bottom right", annotation_font_color="green")
+                    
+                    fig.update_layout(
+                        title=f"Pergerakan Harga {selected_div_stock} (1 Tahun Terakhir)",
+                        height=400,
+                        margin=dict(l=20, r=20, t=50, b=20),
+                        yaxis_title="Harga (Rp)",
+                        xaxis_rangeslider_visible=False,
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Kesimpulan AI Sederhana
+                    jarak_ke_dasar = ((current_price - lowest_price) / lowest_price) * 100
+                    if jarak_ke_dasar < 10:
+                        st.success(f"🔥 **Sangat Menarik!** Harga saat ini (Rp {int(current_price)}) sangat dekat dengan titik dasar setahun terakhir. Risiko *Dividend Trap* tergolong rendah.")
+                    elif jarak_ke_dasar > 40:
+                        st.error(f"⚠️ **Hati-Hati!** Harga saat ini sudah terbang +{jarak_ke_dasar:.1f}% dari titik terbawahnya. Waspada bantingan harga (Markdown) setelah Ex-Date.")
+                    else:
+                        st.warning(f"⚖️ **Netral.** Harga berada di area tengah. Lakukan akumulasi secara bertahap jika jadwal dividen masih jauh.")
 # --- 11. FITUR SCREENER ---
 def run_screener(use_idx_data, stock_list, category_name):
     st.header(f"🔍 Smart Money Screener ({category_name})")
