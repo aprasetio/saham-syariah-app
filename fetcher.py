@@ -7,6 +7,10 @@ import requests
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
+# --- TAHAP 4: IMPORT MACHINE LEARNING ---
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
+
 # --- 1. AMBIL KUNCI RAHASIA DARI GITHUB SECRETS ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -47,10 +51,10 @@ def get_idx_target_date(df):
     return df.index[-1].strftime('%Y-%m-%d')
 
 # --- 3. PENGUMPULAN DATA & KALKULASI ---
-print(f"[{datetime.utcnow()}] 🚀 Memulai Auto-Screening & Quant Ranking JII30...")
+print(f"[{datetime.utcnow()}] 🚀 Memulai Auto-Screening, Quant Ranking, & AI Prediction JII30...")
 ihsg_df = get_ihsg_data()
 tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
-price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
+price_data = yf.download(tickers, period="2y", group_by='ticker', auto_adjust=True, progress=False, threads=True) # Tambah periode ke 2y utk ML
 
 raw_data_list = []
 
@@ -65,7 +69,6 @@ for t in tickers:
         if df.empty or len(df) < 50: continue
 
         if df['Volume'].iloc[-1] < 5000000:
-            print(f"⏩ SKIP {t}: Volume terlalu kecil")
             continue
 
         target_date = get_idx_target_date(df)
@@ -76,7 +79,6 @@ for t in tickers:
         df['SMA100'] = df.ta.sma(length=100); df['EMA200'] = df.ta.ema(length=200)
         df['ATR'] = df.ta.atr(length=14)
 
-        # Tahap 1: Donchian Channels
         donchian = df.ta.donchian(lower_length=20, upper_length=20)
         if donchian is not None: df = pd.concat([df, donchian], axis=1)
 
@@ -84,6 +86,7 @@ for t in tickers:
         high_low_diff = high_low_diff.replace(0, 0.0001)
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / high_low_diff) * df['Volume']
         df['CMF'] = ad.fillna(0).rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
+        df['Ret_1'] = df['Close'].pct_change() # Kinerja Harian untuk AI
 
         if not ihsg_df.empty:
             df = df.join(ihsg_df, how='left')
@@ -91,11 +94,40 @@ for t in tickers:
             df['Stock_Ret_20'] = (df['Close'] - df['Close'].shift(20)) / df['Close'].shift(20)
             df['IHSG_Ret_20'] = (df['IHSG_Close'] - df['IHSG_Close'].shift(20)) / df['IHSG_Close'].shift(20)
 
+        # --- TAHAP 4: MACHINE LEARNING (K-Nearest Neighbors) ---
+        prob_up = 0.5
+        try:
+            # 1. Labeling: Apakah besoknya naik (1) atau turun (0)?
+            df['Target_Besok'] = (df['Close'].shift(-1) > df['Close']).astype(int)
+            
+            # 2. Siapkan Data Pembelajaran AI (Tanpa baris terakhir karena besok belum terjadi)
+            ml_df = df[['Rsi', 'CMF', 'Ret_1', 'Target_Besok']].dropna()
+            
+            if len(ml_df) > 100: # Syarat AI jalan: Harus ada minimal 100 hari histori
+                X = ml_df[['Rsi', 'CMF', 'Ret_1']]
+                y = ml_df['Target_Besok']
+                
+                # Standarisasi Skala Data
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X)
+                
+                # Latih AI (Mencari 5 tetangga terdekat)
+                knn = KNeighborsClassifier(n_neighbors=5)
+                knn.fit(X_scaled, y)
+                
+                # Prediksi Hari Ini
+                today_features = pd.DataFrame({'Rsi': [df['Rsi'].iloc[-1]], 'CMF': [df['CMF'].iloc[-1]], 'Ret_1': [df['Ret_1'].iloc[-1]]})
+                today_scaled = scaler.transform(today_features)
+                
+                # Ambil Probabilitas Naik (Class 1)
+                prob_up = knn.predict_proba(today_scaled)[0][1]
+        except Exception as e:
+            print(f"⚠️ AI Error {t}: {e}")
+
         curr, prev = df.iloc[-1], df.iloc[-2]
         close, volume, atr = curr['Close'], curr['Volume'], curr.get('ATR', 0)
-        ret_20 = curr.get('Stock_Ret_20', 0) # Kinerja 1 Bulan
+        ret_20 = curr.get('Stock_Ret_20', 0) 
 
-        # --- Skor Teknikal Dasar ---
         score = 0; reasons = []
         if curr['Close'] > curr.get('EMA200', 0): score += 1; reasons.append("📈 Uptrend")
         if ret_20 > curr.get('IHSG_Ret_20', 0): score += 1.5; reasons.append("🌟 IHSG")
@@ -106,6 +138,10 @@ for t in tickers:
         if pd.notna(dcu) and dcu > 0 and curr['Close'] >= (dcu * 0.99):
             score += 1.5; reasons.append("🚀 Breakout DC")
         
+        # Injeksi Sinyal AI ke dalam Katalis
+        if prob_up >= 0.7: 
+            score += 2.0; reasons.append(f"🤖 AI Bullish ({int(prob_up*100)}%)")
+        
         s_candle, _ = check_candlestick_patterns(curr, prev)
         score += s_candle
 
@@ -113,12 +149,11 @@ for t in tickers:
         if close > curr.get('SMA50', 0): wyckoff = "Markup" if close > curr.get('SMA20', 0) else "Distribution"
         else: wyckoff = "Markdown" if close < curr.get('SMA20', 0) else "Accumulation"
 
-        # --- TAHAP 2 & 3: TARIK DATA SEKTOR & FUNDAMENTAL ---
         try:
             info = yf.Ticker(t).info
             pbv = info.get('priceToBook', 0)
             bp_ratio = (1 / pbv) if (pd.notna(pbv) and pbv > 0) else 0
-            sector = info.get('sector', 'Unknown') # TAHAP 3: Pengenalan Sektor
+            sector = info.get('sector', 'Unknown') 
         except: bp_ratio = 0; sector = 'Unknown'
 
         try:
@@ -144,20 +179,12 @@ if raw_data_list:
     print("📊 Menjalankan Cross-Sectional & Sectoral Ranking...")
     df_quant = pd.DataFrame(raw_data_list)
     
-    # Ranking Tahap 2 (Value, Momentum, Volatility)
     df_quant['mom_rank'] = df_quant['mom_6m'].rank(pct=True)
     df_quant['vol_rank'] = df_quant['vol_6m'].rank(ascending=False, pct=True) 
     df_quant['bp_rank'] = df_quant['bp_ratio'].rank(pct=True)
 
-    # --- TAHAP 3: LOGIKA MEAN-REVERSION SEKTORAL ---
-    # 1. Hitung Rata-rata Kinerja 1 Bulan untuk Tiap Sektor
     df_quant['sector_mean_ret'] = df_quant.groupby('sector')['ret_20'].transform('mean')
-    
-    # 2. Cari selisihnya: Kinerja Saham minus Rata-Rata Sektornya
-    # (Makin negatif angkanya, makin tertinggal dia dibanding teman se-sektornya)
     df_quant['sector_diff'] = df_quant['ret_20'] - df_quant['sector_mean_ret']
-    
-    # 3. Ranking siapa yang paling "tertindas/tertinggal" (Ascending=True)
     df_quant['mr_rank'] = df_quant['sector_diff'].rank(ascending=True, pct=True)
 
     for index, row in df_quant.iterrows():
@@ -165,21 +192,18 @@ if raw_data_list:
         final_score = row['base_score']
         reasons = row['reasons'].copy()
         
-        # Poin Tahap 2
         if row['mom_rank'] >= 0.8: final_score += 1.5; reasons.append("🔥 Top Momentum")
         if row['vol_rank'] >= 0.8: final_score += 1.0; reasons.append("🛡️ Low Volatility")
         if row['bp_rank'] >= 0.8: final_score += 1.5; reasons.append("💰 Undervalued")
 
-        # Poin Tahap 3 (Mean-Reversion Bonus)
-        # Jika dia termasuk 20% saham paling tertinggal di bursanya, DAN sedang minus dari sektornya
         if row['mr_rank'] <= 0.2 and row['sector_diff'] < 0:
-            final_score += 2.0  # Poin pantulan besar!
-            reasons.append(f"🔄 Rebound {row['sector'][:8]}") # Ditulis: Rebound Energy / Rebound Financia
+            final_score += 2.0  
+            reasons.append(f"🔄 Rebound {row['sector'][:8]}") 
 
         wyckoff = row['wyckoff']
         rec = "WAIT"
         if final_score >= 4.5 or "Accumulation" in wyckoff: rec = "✅ BUY"
-        if final_score >= 7.5: rec = "💎 STRONG BUY"
+        if final_score >= 8.0: rec = "💎 STRONG BUY"
 
         if final_score < 3.5 and "Accumulation" not in wyckoff:
             continue 
