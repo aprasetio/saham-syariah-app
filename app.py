@@ -649,12 +649,15 @@ def show_chart(use_idx_data):
         sl_pct = ((close - stop_loss) / close) * 100 if close > 0 else 0
         c2.metric(f"Target Profit (+{tp_pct:.1f}%)", f"Rp {int(target_profit):,}", f"Batas Rugi (SL): Rp {int(stop_loss):,} (-{sl_pct:.1f}%)", delta_color="off")
         
-        if net_foreign is not None:
+        # Perbaikan Logika: Jika API gagal, nilainya akan 0 mutlak. Tidak mungkin saham JII30 transaksi asingnya persis Rp 0.
+        if net_foreign is not None and (net_foreign != 0 or avg_buy_price != 0):
             power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
             c3.metric(f"Asing ({'🟢 AKUM' if net_foreign > 0 else '🔴 DISTRIB'})", format_rupiah(net_foreign), f"Dominasi: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}", delta_color="normal" if net_foreign > 0 else "inverse")
+        elif net_foreign == 0 and avg_buy_price == 0 and use_idx_data:
+            c3.metric("Data Bandar (Asing)", "Gagal Akses API", "Server IDX Sibuk / Timeout", delta_color="off")
         else:
-            c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Standar / Kuota Habis", delta_color="off") 
-        
+            c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Standar / Kuota Habis", delta_color="off")
+            
         # FITUR TAHAP 5: Menampilkan Hasil AI di Kotak ke-4
         is_outperform = "🌟 IHSG" in " ".join(reasons)
         pasar_text = "MENGALAHKAN IHSG" if is_outperform else "-UNDERPERFORM"
