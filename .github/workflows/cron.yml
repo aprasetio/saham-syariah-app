@@ -5,9 +5,7 @@ on:
     # Berjalan jam 19:10 WIB (12:10 UTC) Setiap Senin - Jumat
     - cron: '10 12 * * 1-5'
   workflow_dispatch:
-# --- TAMBAHAN BARU: Memberikan Izin Kepada Robot ---
-permissions:
-  contents: write
+
 # Menyembunyikan peringatan Node.js
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -22,7 +20,6 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          # KITA TURUTI MAUNYA PANDAS-TA: Naikkan ke versi 3.12!
           python-version: '3.12'
 
       - name: Install Dependencies
@@ -36,8 +33,3 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           IDX_API_KEY: ${{ secrets.IDX_API_KEY }}
         run: python fetcher.py
-
-      # --- TRIK RAHASIA ANTI-MATI ---
-      # Mencegah GitHub mematikan cron otomatis jika tidak ada aktivitas selama 60 hari
-      - name: Keepalive Workflow
-        uses: gautamkrishnar/keepalive-workflow@v2
