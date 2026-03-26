@@ -111,20 +111,16 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     [data-testid="stMetric"] { 
-        background-color: #f0f2f6 !important; border: 1px solid #d6d6d6 !important; 
+        background-color: var(--secondary-background-color) !important; 
+        border: 1px solid rgba(128, 128, 128, 0.2) !important; 
         padding: 15px !important; border-radius: 10px !important; height: 100% !important; 
         white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
     }
     [data-testid="stMetricLabel"] p { 
-        color: #31333F !important; font-weight: bold !important; font-size: 0.95rem !important; 
-        white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
+        color: var(--text-color) !important; font-weight: bold !important; font-size: 0.95rem !important; 
     }
     [data-testid="stMetricValue"] div { 
-        color: #000000 !important; font-size: 1.2rem !important; 
-        white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
-    }
-    [data-testid="stMetricDelta"] div {
-        white-space: normal !important; word-wrap: break-word !important; overflow-wrap: break-word !important;
+        color: var(--text-color) !important; font-size: 1.2rem !important; 
     }
 </style>
 """, unsafe_allow_html=True)
@@ -544,10 +540,12 @@ def show_chart(use_idx_data):
         with c1:
             st.markdown("""
             **Fase Bandar (Wyckoff):**
-            1. 🟢 **Accumulation:** Harga mendatar di bawah. Bandar mengumpulkan barang.
+            1. 🟢 **Accumulation:** Harga mendatar di bawah. Waktunya cicil beli.
             2. 🔵 **Markup:** Harga terbang. Uptrend kuat.
-            3. 🔴 **Distribution:** Harga tertahan di pucuk. Bandar mulai jualan.
-            4. 🟠 **Markdown:** Bandar keluar, harga jatuh bebas.
+            3. 🔴 **Distribution:** Harga tertahan di pucuk. Bandar jualan.
+            4. 🟠 **Markdown:** Bandar jatuh.
+            
+            *(💡 **Catatan Penting:** Fase "Accumulation" bisa terjadi bersamaan dengan indikator CMF yang Merah/Distribusi. Ini normal! Artinya harga saham sudah di dasar harga, namun mayoritas trader lokal masih panik jualan (CMF Merah), sementara Bandar mulai menampung).*
             """)
         with c2:
             st.markdown("""
@@ -659,10 +657,10 @@ def show_chart(use_idx_data):
             c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Standar / Kuota Habis", delta_color="off")
             
         # FITUR TAHAP 5: Menampilkan Hasil AI di Kotak ke-4
-        is_outperform = "🌟 IHSG" in " ".join(reasons)
-        pasar_text = "MENGALAHKAN IHSG" if is_outperform else "-UNDERPERFORM"
+        ai_status = "🔥 Sinyal Bullish" if prob_up >= 0.7 else ("❄️ Sinyal Bearish" if prob_up < 0.5 else "⚖️ Netral")
         ai_color = "normal" if prob_up >= 0.5 else "inverse"
-        c4.metric(f"🤖 AI Predictor (Besok)", f"{int(prob_up*100)}% NAIK", pasar_text, delta_color=ai_color)
+        
+        c4.metric(f"🤖 AI Predictor (Besok)", f"{int(prob_up*100)}% NAIK", ai_status, delta_color=ai_color)
         
         # VISUALISASI GRAFIK
         st.subheader(f"Visualisasi Grafik & Quant Radar {ticker_only}")
