@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 # --- TAHAP 4: IMPORT MACHINE LEARNING ---
@@ -51,10 +51,10 @@ def get_idx_target_date(df):
     return df.index[-1].strftime('%Y-%m-%d')
 
 # --- 3. PENGUMPULAN DATA & KALKULASI ---
-print(f"[{datetime.utcnow()}] 🚀 Memulai Auto-Screening, Quant Ranking, & AI Prediction JII30...")
+print(f"[{datetime.now(timezone.utc)}] 🚀 Memulai Auto-Screening, Quant Ranking, & AI Prediction JII30...")
 ihsg_df = get_ihsg_data()
 tickers = [f"{s}.JK" for s in SHARIA_STOCKS]
-price_data = yf.download(tickers, period="2y", group_by='ticker', auto_adjust=True, progress=False, threads=True) # Tambah periode ke 2y utk ML
+price_data = yf.download(tickers, period="2y", group_by='ticker', auto_adjust=True, progress=False, threads=True) 
 
 raw_data_list = []
 
@@ -86,7 +86,7 @@ for t in tickers:
         high_low_diff = high_low_diff.replace(0, 0.0001)
         ad = ((2 * df['Close'] - df['High'] - df['Low']) / high_low_diff) * df['Volume']
         df['CMF'] = ad.fillna(0).rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
-        df['Ret_1'] = df['Close'].pct_change() # Kinerja Harian untuk AI
+        df['Ret_1'] = df['Close'].pct_change() 
 
         if not ihsg_df.empty:
             df = df.join(ihsg_df, how='left')
@@ -94,32 +94,23 @@ for t in tickers:
             df['Stock_Ret_20'] = (df['Close'] - df['Close'].shift(20)) / df['Close'].shift(20)
             df['IHSG_Ret_20'] = (df['IHSG_Close'] - df['IHSG_Close'].shift(20)) / df['IHSG_Close'].shift(20)
 
-        # --- TAHAP 4: MACHINE LEARNING (K-Nearest Neighbors) ---
         prob_up = 0.5
         try:
-            # 1. Labeling: Apakah besoknya naik (1) atau turun (0)?
             df['Target_Besok'] = (df['Close'].shift(-1) > df['Close']).astype(int)
-            
-            # 2. Siapkan Data Pembelajaran AI (Tanpa baris terakhir karena besok belum terjadi)
             ml_df = df[['Rsi', 'CMF', 'Ret_1', 'Target_Besok']].dropna()
             
-            if len(ml_df) > 100: # Syarat AI jalan: Harus ada minimal 100 hari histori
+            if len(ml_df) > 100: 
                 X = ml_df[['Rsi', 'CMF', 'Ret_1']]
                 y = ml_df['Target_Besok']
                 
-                # Standarisasi Skala Data
                 scaler = StandardScaler()
                 X_scaled = scaler.fit_transform(X)
                 
-                # Latih AI (Mencari 5 tetangga terdekat)
                 knn = KNeighborsClassifier(n_neighbors=5)
                 knn.fit(X_scaled, y)
                 
-                # Prediksi Hari Ini
                 today_features = pd.DataFrame({'Rsi': [df['Rsi'].iloc[-1]], 'CMF': [df['CMF'].iloc[-1]], 'Ret_1': [df['Ret_1'].iloc[-1]]})
                 today_scaled = scaler.transform(today_features)
-                
-                # Ambil Probabilitas Naik (Class 1)
                 prob_up = knn.predict_proba(today_scaled)[0][1]
         except Exception as e:
             print(f"⚠️ AI Error {t}: {e}")
@@ -138,7 +129,6 @@ for t in tickers:
         if pd.notna(dcu) and dcu > 0 and curr['Close'] >= (dcu * 0.99):
             score += 1.5; reasons.append("🚀 Breakout DC")
         
-        # Injeksi Sinyal AI ke dalam Katalis
         if prob_up >= 0.7: 
             score += 2.0; reasons.append(f"🤖 AI Bullish ({int(prob_up*100)}%)")
         
@@ -251,6 +241,6 @@ if results:
         print(f"Gagal membersihkan database: {e}")
 
     supabase.table('jii30_daily_data').insert(results).execute()
-    print(f"[{datetime.utcnow()}] 🎉 Sukses menyimpan {len(results)} saham ke Database!")
+    print(f"[{datetime.now(timezone.utc)}] 🎉 Sukses menyimpan {len(results)} saham ke Database!")
 else:
-    print(f"[{datetime.utcnow()}] ⚠️ Tidak ada saham yang lolos uji Kuanta hari ini.")
+    print(f"[{datetime.now(timezone.utc)}] ⚠️ Tidak ada saham yang lolos uji Kuanta hari ini.")
