@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 # --- TAHAP 4: IMPORT MACHINE LEARNING ---
