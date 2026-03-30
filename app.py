@@ -738,7 +738,44 @@ def show_admin_dashboard():
                     st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
                 else: st.info("Belum ada data log pencarian saham.")
 
+# --- FITUR BARU: PUSAT EDUKASI & STRATEGI ---
+def show_education():
+    st.header("📚 Pusat Edukasi & Strategi Trading")
+    st.markdown("Pelajari cara kerja sistem kecerdasan buatan (AI) ini agar Anda bisa memaksimalkan profit dan menghindari jebakan pasar.")
+    st.divider()
 
+    with st.expander("🤔 1. Kenapa Status Saham di Screener & Chart Bisa Berbeda?"):
+        st.markdown("""
+        **Ini adalah fitur keamanan ganda (Double Confirmation), bukan error!**
+        
+        * 🔍 **Smart Screener (Melihat Masa Lalu):** Bekerja seperti **Radar**. Ia memindai seluruh saham di malam hari untuk mencari mana yang fundamentalnya paling murah dan trennya paling stabil secara umum.
+        * 📊 **Advanced Chart (Melihat Masa Kini):** Bekerja seperti **Sniper**. Ia hanya fokus pada 1 saham pilihan Anda dan merespons pergerakan harga detik ini juga.
+
+        **💡 Strategi Pro:**
+        Gunakan *Screener* di malam hari untuk mencari kandidat saham (misal statusnya ✅ BUY). Besok siangnya, cek saham tersebut di *Advanced Chart*. Jika statusnya naik menjadi **💎 STRONG BUY**, itu artinya fundamental yang bagus kemarin, hari ini sedang diledakkan oleh momentum pembelian!
+        """)
+
+    with st.expander("⏱️ 2. Apakah Data di Aplikasi Ini 100% Live?"):
+        st.markdown("""
+        **Tidak 100% Live, dan ini justru SANGAT BAGUS untuk gaya trading santai (Swing Trading).**
+
+        * **Harga Saham:** Ada jeda (*delay*) sekitar 10-15 menit dari pasar asli.
+        * **Data Bandar (Asing):** Bursa Efek Indonesia (BEI) **menyembunyikan** data bandar selama jam kerja bursa. Data bandar baru akan terlihat utuh dan valid setelah bursa tutup (pukul 16:00 WIB).
+
+        **💡 Strategi Pro:**
+        **Jangan gunakan** aplikasi ini untuk *Scalping* (beli dan jual dalam hitungan menit). Aplikasi ini dirancang khusus untuk **Swing Trading** (simpan saham beberapa hari/minggu untuk profit maksimal).
+        ⏰ **Waktu Analisa Terbaik:** Buka aplikasi ini pada pukul **15:30 - 15:50 WIB** (menjelang bursa tutup) untuk mengambil keputusan beli/jual yang paling matang.
+        """)
+
+    with st.expander("🌊 3. Rahasia Membaca Dominasi Asing (%)"):
+        st.markdown("""
+        Terkadang Anda melihat statusnya **🟢 AKUM (Akumulasi)**, tapi angka persentasenya turun drastis (misal dari 20% kemarin menjadi 5% hari ini). Apa artinya?
+
+        *Bayangkan mengisi tandon air:* Kemarin Anda buka keran putaran penuh (20%). Hari ini kerannya Anda kecilkan (5%). Airnya **tetap bertambah** (AKUM), tapi alirannya mulai melemah.
+
+        **💡 Strategi Pro:**
+        Penurunan % Dominasi Asing adalah **Sinyal Peringatan Dini**. Artinya, Asing masih belanja, tapi "bensin" mereka mulai habis. Jika persentase ini terus mengecil dari hari ke hari, bersiaplah karena besok atau lusa mereka mungkin akan berbalik arah menjadi jualan besar-besaran (Distribusi).
+        """)
 # --- 14. PENGATURAN SIDEBAR & SMART ROUTING (ETALASE FREEMIUM) ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 st.sidebar.caption(f"Status Akun: **{user_role.upper()}**")
@@ -749,7 +786,7 @@ try:
 except: pass
 st.sidebar.divider()
 
-menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "📅 Dividend Hunter"]
+menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "📅 Dividend Hunter", "📚 Pusat Edukasi"]
 if is_admin:
     menu_options.append("👑 Admin Dashboard")
     
@@ -842,3 +879,5 @@ elif mode == "📅 Dividend Hunter":
     show_dividend_hunter(active_stock_list, active_category_name)
 elif mode == "👑 Admin Dashboard":
     show_admin_dashboard()
+elif mode == "📚 Pusat Edukasi":
+    show_education()
