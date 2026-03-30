@@ -449,7 +449,9 @@ def run_screener(use_idx_data, stock_list, category_name):
         # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 + Data IDX + Hasil Otak AI)
         if category_name == "Lapis 1 (JII30)" and use_idx_data:
             with st.spinner("⚡ Menyedot data dan hasil hitungan AI dari Server..."):
-                res = supabase.table('jii30_daily_data').select('*').execute()
+                # Pilih tabel database berdasarkan sakelar benua
+                    table_name = 'jii30_daily_data' if "Indonesia" in market_choice else 'us_daily_data'
+                    res = supabase.table(table_name).select('*').execute()
                 if res.data:
                     df_res = pd.DataFrame(res.data)
                     
@@ -568,7 +570,8 @@ def show_chart(use_idx_data):
             submit_search = st.form_submit_button("Cari Saham 🔍")
             
     if submit_search and ticker:
-        symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
+        # Tambahkan .JK HANYA jika pasar Indonesia
+            symbol = f"{ticker}.JK" if "Indonesia" in market_choice and not ticker.endswith(".JK") else ticker
         ticker_only = ticker.replace(".JK", "")
         
         try: supabase.table('audit_logs').insert({"user_email": user_email, "action": "SEARCH_CHART", "details": f"Mencari chart: {ticker_only}"}).execute()
@@ -793,9 +796,42 @@ if is_admin:
 mode = st.sidebar.radio("Pilih Menu:", menu_options)
 st.sidebar.divider()
 
+# --- FITUR BARU: SAKELAR BENUA & LOGIKA SIDEBAR ---
+market_choice = st.sidebar.radio("🌍 Pilih Bursa:", ["🇮🇩 Indonesia (BEI)", "🇺🇸 Wall Street (US)"])
+st.sidebar.divider()
+
 use_idx_data = False
-active_stock_list = SHARIA_STOCKS
-active_category_name = "Lapis 1 (JII30)"
+
+if "Indonesia" in market_choice:
+    if mode == "🔍 Super Screener" or mode == "📅 Dividend Hunter":
+        kategori_saham = st.sidebar.radio("Pilih Kategori Saham:", ["👑 Lapis 1 (JII30)", "🚀 Lapis 2 (Mid-Small Caps)"])
+        st.sidebar.divider()
+        if kategori_saham == "🚀 Lapis 2 (Mid-Small Caps)":
+            active_stock_list = SHARIA_MIDCAP_STOCKS
+            active_category_name = "Lapis 2"
+            if mode == "🔍 Super Screener":
+                st.sidebar.info("✨ Mode Lapis 2 otomatis menggunakan Data Standar (0 Kuota).")
+        else:
+            active_stock_list = SHARIA_STOCKS
+            active_category_name = "Lapis 1 (JII30)"
+            if mode == "🔍 Super Screener":
+                data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Premium)"])
+                if "Data IDX" in data_source:
+                    if user_role == 'free': st.sidebar.warning("🔒 Fitur Terkunci. Upgrade ke VIP/Pro.")
+                    else: use_idx_data = True
+    elif mode == "📊 Advanced Chart":
+        active_stock_list = SHARIA_STOCKS
+        active_category_name = "Lapis 1"
+        data_source = st.sidebar.radio("Pilih Sumber Data:", ["🌐 Data Standar (Gratis)", "🏦 Data IDX (Premium)"])
+        if "Data IDX" in data_source:
+            if user_role == 'free': st.sidebar.warning("🔒 Fitur Terkunci. Upgrade ke VIP/Pro.")
+            else: use_idx_data = True
+else:
+    # MODE WALL STREET
+    active_stock_list = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "LLY", "JPM", "V", "MA", "UNH", "HD", "PG", "COST", "JNJ", "NFLX", "AMD", "CRM"]
+    active_category_name = "US Top Tech"
+    if mode == "📊 Advanced Chart" or mode == "🔍 Super Screener":
+        st.sidebar.info("ℹ️ Mode Wall Street: Data Bandar/Asing tidak tersedia (Sistem Dark Pools).")
 
 # 1. LOGIKA SIDEBAR: SUPER SCREENER
 if mode == "🔍 Super Screener":
