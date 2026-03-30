@@ -448,11 +448,13 @@ def run_screener(use_idx_data, stock_list, category_name):
     if st.button("MULAI SCANNING"):
         # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 + Data IDX + Hasil Otak AI)
         if category_name == "Lapis 1 (JII30)" and use_idx_data:
-            with st.spinner("⚡ Menyedot data dan hasil hitungan AI dari Server..."):
-                # Pilih tabel database berdasarkan sakelar benua
-                    table_name = 'jii30_daily_data' if "Indonesia" in market_choice else 'us_daily_data'
-                    res = supabase.table(table_name).select('*').execute()
-                if res.data:
+            with st.spinner(f"Memindai database {active_category_name}..."):
+                    try:
+                        # Pilih tabel database berdasarkan sakelar benua
+                        table_name = 'jii30_daily_data' if "Indonesia" in market_choice else 'us_daily_data'
+                        res = supabase.table(table_name).select('*').execute()
+                        
+                        if res.data:
                     df_res = pd.DataFrame(res.data)
                     
                     if 'fetch_date' in df_res.columns:
