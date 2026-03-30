@@ -1,10 +1,15 @@
-name: JII30 Daily Screener Fetcher
+name: Global Daily Screener Fetcher
 
 on:
   schedule:
-    # Berjalan jam 19:10 WIB (12:10 UTC) Setiap Senin - Jumat
+    # 🇮🇩 Shift 1: Jam 19:10 WIB (Fokus menarik data IDX yang baru tutup)
     - cron: '10 12 * * 1-5'
+    
+    # 🇺🇸 Shift 2: Jam 05:00 WIB Pagi (Fokus menarik data Wall Street yang baru tutup)
+    - cron: '0 22 * * 1-5'
+    
   workflow_dispatch:
+
 
 # Menyembunyikan peringatan Node.js
 env:
