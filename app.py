@@ -455,7 +455,7 @@ def run_screener(use_idx_data, stock_list, category_name):
                         res = supabase.table(table_name).select('*').execute()
                         
                         if res.data:
-                    df_res = pd.DataFrame(res.data)
+                            df_res = pd.DataFrame(res.data)
                     
                     if 'fetch_date' in df_res.columns:
                         latest_date = df_res['fetch_date'].max()
