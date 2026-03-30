@@ -259,10 +259,23 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
     supabase.table(table_name).insert(results).execute()
     print(f"[{datetime.now(timezone.utc)}] 🎉 Sukses menyimpan ke tabel: {table_name}")
 
-# --- 4. EKSEKUSI JADWAL CRON ---
+# --- 4. EKSEKUSI JADWAL CRON (SMART SCHEDULER) ---
 if __name__ == "__main__":
-    # Eksekusi 1: Pasar Indonesia (JII30) -> Menyimpan ke jii30_daily_data
-    run_screener("JII30 (Indonesia)", SHARIA_STOCKS, "^JKSE", "jii30_daily_data", use_goapi=True)
-    
-    # Eksekusi 2: Pasar Amerika (US Top Tech) -> Menyimpan ke us_daily_data
-    run_screener("Wall Street (US)", US_STOCKS, "^GSPC", "us_daily_data", use_goapi=False)
+    # Cek jam saat robot berjalan (dalam waktu UTC)
+    current_utc_hour = datetime.now(timezone.utc).hour
+
+    # SHIFT 1: Sekitar jam 19:00 WIB (Sama dengan 12:00 UTC)
+    if 10 <= current_utc_hour <= 15:
+        print("🕒 Mode Shift 1 (Malam): Mengeksekusi Pasar Indonesia...")
+        run_screener("JII30 (Indonesia)", SHARIA_STOCKS, "^JKSE", "jii30_daily_data", use_goapi=True)
+
+    # SHIFT 2: Sekitar jam 05:00 WIB (Sama dengan 22:00 UTC)
+    elif 20 <= current_utc_hour <= 23 or 0 <= current_utc_hour <= 2:
+        print("🕒 Mode Shift 2 (Pagi): Mengeksekusi Pasar Wall Street...")
+        run_screener("Wall Street (US)", US_STOCKS, "^GSPC", "us_daily_data", use_goapi=False)
+
+    # MANUAL RUN: Jika Anda menekan tombol "Run workflow" secara manual di GitHub
+    else:
+        print("🕒 Mode Manual: Mengeksekusi Kedua Pasar secara berurutan...")
+        run_screener("JII30 (Indonesia)", SHARIA_STOCKS, "^JKSE", "jii30_daily_data", use_goapi=True)
+        run_screener("Wall Street (US)", US_STOCKS, "^GSPC", "us_daily_data", use_goapi=False)
