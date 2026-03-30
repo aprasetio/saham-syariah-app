@@ -422,33 +422,39 @@ def show_education():
         st.markdown("Ada jeda 10-15 menit dari pasar asli. Aplikasi ini dirancang untuk **Swing Trading** (menahan saham beberapa hari/minggu), bukan untuk *Scalping* harian. Waktu analisa terbaik adalah 15:30 WIB (menjelang bursa tutup).")
 # --- 12. MESIN UTAMA: SMART SCREENER (DATABASE + LIVE SCAN) ---
 def show_kamus_screener():
-    st.markdown("---")
-    st.markdown("### 📖 Kamus Indikator AI & Istilah")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("""
-        **💎 REKOMENDASI AI:**
-        * **💎 STRONG BUY** : Saham istimewa (Fundamental murah, Tren Bullish, Probabilitas > 70%).
-        * **✅ BUY** : Saham bagus untuk diakumulasi cicil beli (Risiko rendah).
-        
-        **🌊 FASE WYCKOFF (Siklus Bandar):**
-        * **🟢 Accumulation** : Fase paling aman. Bandar sedang mengumpulkan barang.
-        * **🔵 Markup** : Harga sedang diterbangkan. Cocok untuk *trend-following*.
-        * **🔴 Distribution** : HATI-HATI! Bandar sedang jualan di pucuk.
-        * **🟠 Markdown** : Harga sedang dihancurkan ke bawah. Hindari!
-        """)
-    with c2:
-        st.markdown("""
-        **🔥 KATALIS PENDORONG:**
-        * **🤖 AI Bullish** : Machine Learning memprediksi besok harga akan naik.
-        * **🔥 Top Momentum** : Pergerakan terkuat dalam 6 bulan.
-        * **💰 Undervalued** : Sangat murah dibanding nilai buku.
-        * **🌟 Market Beat** : Saham bergerak naik melawan arus market yang turun.
-        * **🐳 CMF** : Uang besar (Smart Money) masuk secara akumulatif.
-        * **💎 RSI** : Oversold (jenuh jual/terlalu murah) dan siap mantul.
-        * **🚀 Breakout DC** : Menjebol atap *Donchian Channel*.
-        * **🔥 MA** : Uptrend sempurna (Harga di atas SMA 20, 50, 100, EMA 200).
-        """)
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("📖 Kamus Lengkap Indikator AI & Istilah (Klik untuk Buka)"):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            **💎 REKOMENDASI AI:**
+            * **💎 STRONG BUY** : Saham istimewa (Fundamental murah, Tren Bullish, Probabilitas AI > 70%).
+            * **✅ BUY** : Saham bagus untuk diakumulasi cicil beli (Risiko rendah).
+            
+            **🌊 FASE WYCKOFF (Siklus Bandar):**
+            * **🟢 Accumulation** : Fase aman. Bandar sedang mengumpulkan barang di harga bawah.
+            * **🔵 Markup** : Harga sedang diterbangkan. Cocok untuk *trend-following*.
+            * **🔴 Distribution** : HATI-HATI! Bandar sedang jualan (buang barang) di pucuk.
+            * **🟠 Markdown** : Harga dihancurkan ke bawah. Hindari!
+            
+            **📈 INDIKATOR GRAFIK & TEKNIKAL:**
+            * **Donchian Channels (Area Abu-abu)** : Mengukur batas ekstrem harga. Jika harga menembus batas atas (Breakout DC), itu sinyal tren kuat baru dimulai.
+            * **Moving Average (Garis Merah/Biru)** : Rata-rata harga. Harga di atas MA = Uptrend.
+            * **RSI (Garis Ungu)** : Momentum jenuh pasar. Di bawah 30 = Oversold (Murah/Waktunya beli). Di atas 70 = Overbought (Mahal/Waktunya jual).
+            """)
+        with c2:
+            st.markdown("""
+            **🔥 KATALIS PENDORONG:**
+            * **🤖 AI Bullish** : Machine Learning memprediksi probabilitas naik sangat tinggi.
+            * **🔥 Top Momentum** : Pergerakan paling kuat & dominan dalam 6 bulan terakhir.
+            * **💰 Undervalued** : Sangat murah dibanding nilai buku perusahaannya.
+            * **🌟 Market Beat** : Bergerak naik kuat melawan arus market/IHSG yang sedang turun.
+            * **🐳 CMF (Chaikin Money Flow)** : Uang besar (Smart Money) masuk diam-diam ke saham ini.
+            * **💎 RSI** : Sedang sangat murah secara teknikal, siap mantul (*rebound*).
+            * **🚀 Breakout DC** : Harga sukses menjebol atap *Donchian Channel*.
+            * **🔥 MA** : Harga saham berada tegak di atas semua garis *Moving Average*.
+            * **🕯️ Pola** : Muncul pola pantulan *Candlestick* seperti *Hammer* atau *Engulfing*.
+            """)
 
 def run_screener(use_idx_data, stock_list, category_name, market_choice):
     st.header(f"🔍 AI Smart Screener - {category_name}")
@@ -645,16 +651,26 @@ def show_chart(use_idx_data, market_choice):
 
                     # --- GRAFIK PLOTLY INTERAKTIF ---
                     st.markdown("### 📈 Grafik Teknikal Interaktif")
+                    st.caption("💡 **Keterangan Grafik:** Batang Lilin (*Candlestick*) menunjukkan fluktuasi harga harian. Garis Biru/Merah adalah tren pergerakan (MA). Area abu-abu di belakang harga adalah **Donchian Channels** (sabuk penahan tren harga). Garis ungu di grafik bawah adalah indikator **RSI** (mengukur titik jenuh beli/jual).")
+                    
                     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
                     
-                    # Candlestick
+                    # 1. Tambahkan Donchian Channels (Sabuk Batas Atas dan Bawah)
+                    if 'DCU_20_20' in df.columns and 'DCL_20_20' in df.columns:
+                        if not df['DCU_20_20'].isna().all():
+                            # Sabuk Atas
+                            fig.add_trace(go.Scatter(x=df.index, y=df['DCU_20_20'], line=dict(color='rgba(150,150,150,0.5)', width=1, dash='dash'), name='DC Upper (Batas Atas)'), row=1, col=1)
+                            # Sabuk Bawah (dengan isian transparan di antaranya)
+                            fig.add_trace(go.Scatter(x=df.index, y=df['DCL_20_20'], line=dict(color='rgba(150,150,150,0.5)', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(150,150,150,0.1)', name='DC Lower (Batas Bawah)'), row=1, col=1)
+
+                    # 2. Candlestick
                     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Harga'), row=1, col=1)
                     
-                    # Moving Averages
+                    # 3. Moving Averages
                     if not df['SMA50'].isna().all(): fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue', width=1), name='SMA 50'), row=1, col=1)
                     if not df['EMA200'].isna().all(): fig.add_trace(go.Scatter(x=df.index, y=df['EMA200'], line=dict(color='red', width=2), name='EMA 200'), row=1, col=1)
                     
-                    # Indikator Bawah (RSI)
+                    # 4. Indikator Bawah (RSI)
                     if not df['Rsi'].isna().all():
                         fig.add_trace(go.Scatter(x=df.index, y=df['Rsi'], line=dict(color='purple', width=1), name='RSI (14)'), row=2, col=1)
                         fig.add_hline(y=70, line_dash="dot", line_color="red", row=2, col=1)
@@ -663,25 +679,8 @@ def show_chart(use_idx_data, market_choice):
                     fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_dark", margin=dict(l=20, r=20, t=30, b=20))
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # --- KAMUS DI ADVANCED CHART ---
-                    with st.expander("📖 Kamus Indikator AI & Istilah (Klik untuk Buka)"):
-                        st.markdown("""
-                        **💎 REKOMENDASI AI:**
-                        * **💎 STRONG BUY** : Saham istimewa (Fundamental murah, Tren Bullish, AI melihat probabilitas naik > 70%).
-                        * **✅ BUY** : Saham bagus untuk diakumulasi cicil beli (Risiko rendah).
-                        
-                        **🌊 FASE WYCKOFF (Siklus Bandar):**
-                        * **🟢 Accumulation** : Fase paling aman. Bandar sedang mengumpulkan barang di harga bawah.
-                        * **🔵 Markup** : Harga sedang diterbangkan. Cocok untuk *trend-following*.
-                        * **🔴 Distribution** : HATI-HATI! Bandar sedang jualan (buang barang) ke ritel di pucuk.
-                        * **🟠 Markdown** : Harga sedang dihancurkan ke bawah. Hindari!
-                        
-                        **🔥 KATALIS PENDORONG:**
-                        * **🤖 AI Bullish** : Machine Learning memprediksi besok harga akan naik.
-                        * **🔥 Top Momentum** : Pergerakan harga saham ini termasuk yang paling liar dan kuat.
-                        * **💰 Undervalued** : Harga saham ini sedang "Salah Harga" (Sangat murah).
-                        * **🌟 Market Beat** : Saham ini bergerak melawan arus pasar.
-                        """)
+                    # Panggil fungsi kamus abadi di bawah grafik
+                    show_kamus_screener()
 
                 except Exception as e:
                     st.error(f"Terjadi kesalahan saat memproses grafik: {e}")
