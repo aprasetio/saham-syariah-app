@@ -422,43 +422,37 @@ def show_education():
         st.markdown("Ada jeda 10-15 menit dari pasar asli. Aplikasi ini dirancang untuk **Swing Trading** (menahan saham beberapa hari/minggu), bukan untuk *Scalping* harian. Waktu analisa terbaik adalah 15:30 WIB (menjelang bursa tutup).")
 # --- 12. MESIN UTAMA: SMART SCREENER (DATABASE + LIVE SCAN) ---
 def show_kamus_screener():
-    st.markdown("<br>", unsafe_allow_html=True)
-    with st.expander("📖 Kamus Lengkap Indikator AI & Istilah (Klik untuk Buka)"):
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("""
-            **💎 REKOMENDASI AI:**
-            * **💎 STRONG BUY** : Saham istimewa (Fundamental murah, Tren Bullish, Probabilitas AI > 70%).
-            * **✅ BUY** : Saham bagus untuk diakumulasi cicil beli (Risiko rendah).
-            
-            **🌊 FASE WYCKOFF (Siklus Bandar):**
-            * **🟢 Accumulation** : Fase aman. Bandar sedang mengumpulkan barang di harga bawah.
-            * **🔵 Markup** : Harga sedang diterbangkan. Cocok untuk *trend-following*.
-            * **🔴 Distribution** : HATI-HATI! Bandar sedang jualan (buang barang) di pucuk.
-            * **🟠 Markdown** : Harga dihancurkan ke bawah. Hindari!
-            
-            **📈 INDIKATOR GRAFIK & TEKNIKAL:**
-            * **Donchian Channels (Area Abu-abu)** : Mengukur batas ekstrem harga. Jika harga menembus batas atas (Breakout DC), itu sinyal tren kuat baru dimulai.
-            * **Moving Average (Garis Merah/Biru)** : Rata-rata harga. Harga di atas MA = Uptrend.
-            * **RSI (Garis Ungu)** : Momentum jenuh pasar. Di bawah 30 = Oversold (Murah/Waktunya beli). Di atas 70 = Overbought (Mahal/Waktunya jual).
-            """)
-        with c2:
-            st.markdown("""
-            **🔥 KATALIS PENDORONG:**
-            * **🤖 AI Bullish** : Machine Learning memprediksi probabilitas naik sangat tinggi.
-            * **🔥 Top Momentum** : Pergerakan paling kuat & dominan dalam 6 bulan terakhir.
-            * **💰 Undervalued** : Sangat murah dibanding nilai buku perusahaannya.
-            * **🌟 Market Beat** : Bergerak naik kuat melawan arus market/IHSG yang sedang turun.
-            * **🐳 CMF (Chaikin Money Flow)** : Uang besar (Smart Money) masuk diam-diam ke saham ini.
-            * **💎 RSI** : Sedang sangat murah secara teknikal, siap mantul (*rebound*).
-            * **🚀 Breakout DC** : Harga sukses menjebol atap *Donchian Channel*.
-            * **🔥 MA** : Harga saham berada tegak di atas semua garis *Moving Average*.
-            * **🕯️ Pola** : Muncul pola pantulan *Candlestick* seperti *Hammer* atau *Engulfing*.
-            """)
+    st.markdown("---")
+    st.markdown("### 📖 Kamus Indikator AI & Istilah")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("""
+        **💎 REKOMENDASI AI:**
+        * **💎 STRONG BUY** : Saham istimewa (Fundamental murah, Tren Bullish, Probabilitas > 70%).
+        * **✅ BUY** : Saham bagus untuk diakumulasi cicil beli (Risiko rendah).
+        
+        **🌊 FASE WYCKOFF (Siklus Bandar):**
+        * **🟢 Accumulation** : Fase paling aman. Bandar sedang mengumpulkan barang.
+        * **🔵 Markup** : Harga sedang diterbangkan. Cocok untuk *trend-following*.
+        * **🔴 Distribution** : HATI-HATI! Bandar sedang jualan di pucuk.
+        * **🟠 Markdown** : Harga sedang dihancurkan ke bawah. Hindari!
+        """)
+    with c2:
+        st.markdown("""
+        **🔥 KATALIS PENDORONG:**
+        * **🤖 AI Bullish** : Machine Learning memprediksi besok harga akan naik.
+        * **🔥 Top Momentum** : Pergerakan terkuat dalam 6 bulan.
+        * **💰 Undervalued** : Sangat murah dibanding nilai buku.
+        * **🌟 Market Beat** : Saham bergerak naik melawan arus market yang turun.
+        * **🐳 CMF** : Uang besar (Smart Money) masuk secara akumulatif.
+        * **💎 RSI** : Oversold (jenuh jual/terlalu murah) dan siap mantul.
+        * **🚀 Breakout DC** : Menjebol atap *Donchian Channel*.
+        * **🔥 MA** : Uptrend sempurna (Harga di atas SMA 20, 50, 100, EMA 200).
+        """)
 
 def run_screener(use_idx_data, stock_list, category_name, market_choice):
     st.header(f"🔍 AI Smart Screener - {category_name}")
-    st.markdown("Menampilkan hasil *screening* algoritma Quant & AI. Lapis 1 & US Market ditarik dari Database Harian. Lapis 2 di-scan secara *Live* (Real-Time).")
+    st.markdown("Menampilkan hasil *screening* algoritma Quant & AI. Data Premium menggunakan GoAPI (Database Harian), Data Standar menggunakan *Live Scan* murni yfinance.")
 
     is_us_market = "US" in market_choice or "Wall Street" in market_choice
 
@@ -466,20 +460,25 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
         if check_and_deduct_quota("screener_run"):
             df_res = pd.DataFrame()
             
-            # LOGIKA 1: BACA DARI DATABASE (Hanya untuk Lapis 1 & Wall Street)
-            if category_name == "Lapis 1 (JII30)" or is_us_market:
-                with st.spinner(f"Memindai database {category_name}..."):
+            # --- JALUR 1: WALL STREET (Database) ---
+            if is_us_market:
+                with st.spinner("Memindai database Wall Street..."):
                     try:
-                        table_name = 'us_daily_data' if is_us_market else 'jii30_daily_data'
-                        res = supabase.table(table_name).select('*').execute()
-                        if res.data:
-                            df_res = pd.DataFrame(res.data)
-                    except Exception as e:
-                        st.error(f"Gagal mengambil data dari database: {e}")
-            
-            # LOGIKA 2: LIVE SCAN GRATISAN (Hanya untuk Lapis 2)
+                        res = supabase.table('us_daily_data').select('*').execute()
+                        if res.data: df_res = pd.DataFrame(res.data)
+                    except: pass
+                    
+            # --- JALUR 2: INDONESIA PREMIUM GOAPI (Database) ---
+            elif use_idx_data:
+                with st.spinner(f"Mengambil data Premium (GoAPI) dari database {category_name}..."):
+                    try:
+                        res = supabase.table('jii30_daily_data').select('*').execute()
+                        if res.data: df_res = pd.DataFrame(res.data)
+                    except: pass
+                    
+            # --- JALUR 3: INDONESIA STANDAR YFINANCE (Live Scan Murni) ---
             else:
-                with st.spinner(f"Melakukan Live Scan untuk {len(stock_list)} saham {category_name}... (Bisa memakan waktu 1-2 menit)"):
+                with st.spinner(f"Melakukan Live Scan murni yfinance untuk {category_name}... (Bisa memakan waktu 1-2 menit)"):
                     try:
                         ihsg_df = get_ihsg_data()
                         live_results = []
@@ -519,10 +518,11 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
                             })
                         df_res = pd.DataFrame(live_results)
                     except Exception as e:
-                        st.error(f"Gagal melakukan Live Scan Lapis 2: {e}")
+                        st.error(f"Gagal melakukan Live Scan: {e}")
 
             # --- TAMPILAN HASIL ---
             if not df_res.empty:
+                # Hanya munculkan CASH IS KING jika asalnya dari Database (Jalur 1 atau 2)
                 if 'kode' in df_res.columns and len(df_res) == 1 and df_res['kode'].iloc[0] == 'CASH':
                     st.error(f"**MODE PROTEKSI MODAL AKTIF (Update: {df_res['fetch_date'].iloc[0]})**")
                     st.warning("🛡️ **CASH IS KING!** " + df_res['katalis'].iloc[0])
@@ -546,29 +546,29 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
                     
                     display_cols.extend(['status', 'fase'])
                     
-                    if not is_us_market and 'power_asing' in df_res.columns and 'modal_asing' in df_res.columns:
+                    # Munculkan kolom Asing HANYA jika pakai GoAPI (Jalur 2)
+                    if use_idx_data and not is_us_market and 'power_asing' in df_res.columns and 'modal_asing' in df_res.columns:
                         df_res['Power Asing'] = df_res['power_asing'].apply(lambda x: f"{float(x):.2f}%" if pd.notna(x) else "0%")
                         df_res['Avg Harga Asing'] = df_res['modal_asing'].apply(lambda x: format_currency(x, False))
                         display_cols.extend(['Power Asing', 'Avg Harga Asing'])
                     
                     display_cols.append('katalis')
                     
-                    # Filter kolom yang benar-benar ada agar tidak crash
                     valid_display_cols = [c for c in display_cols if c in df_res.columns]
                     df_display = df_res[valid_display_cols].copy()
                     df_display.rename(columns={'kode': 'Ticker', 'status': 'Rekomendasi AI', 'fase': 'Fase Wyckoff', 'katalis': 'Katalis Pendorong'}, inplace=True)
                     
                     st.dataframe(df_display, use_container_width=True, hide_index=True, height=(len(df_display) * 35) + 40)
             else:
-                st.warning("⚠️ Tidak ada saham yang lolos filter AI hari ini (atau database sedang kosong).")
+                st.warning("⚠️ Tidak ada saham yang lolos filter teknikal AI hari ini.")
             
-            # MEMUNCULKAN KAMUS SETELAH HASIL (CASH IS KING, Kosong, atau Sukses)
+            # MEMUNCULKAN KAMUS SETELAH HASIL
             show_kamus_screener()
             
         else:
             st.error("❌ Kuota API Harian Anda habis! Upgrade akun atau tunggu *reset* besok jam 00:00 WIB.")
     else:
-        # Jika user belum menekan tombol, tampilkan kamus sebagai panduan
+        # Jika user belum menekan tombol, tampilkan kamus
         show_kamus_screener()
 # --- 13. FITUR ADVANCED CHART & AI SNIPER ---
 def show_chart(use_idx_data, market_choice):
