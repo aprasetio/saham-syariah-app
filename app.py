@@ -786,7 +786,7 @@ def show_admin_dashboard():
                     else: st.info("Belum ada data.")
                 except: st.error("Gagal menarik data.")
                 
-# --- 14. PUSAT EDUKASI & STRATEGI TRADING (ORISINAL) ---
+# --- 14. PUSAT EDUKASI & STRATEGI TRADING ---
 def show_education():
     st.header("📚 Pusat Edukasi & Strategi Trading")
     st.markdown("Pelajari cara kerja sistem kecerdasan buatan (AI) ini agar Anda bisa memaksimalkan profit dan menghindari jebakan pasar.")
@@ -825,16 +825,70 @@ def show_education():
         """)
 
     st.divider()
+    
+    # --- BAGIAN BARU: EDUKASI FITUR VIP ---
+    st.subheader("👑 Panduan Fitur Eksklusif (VIP/PRO)")
+    st.markdown("Panduan cara membaca metrik pada fitur-fitur kuantitatif tingkat lanjut bagi pengguna VIP.")
+    
+    with st.expander("🧪 1. Cara Membaca Mesin Backtesting"):
+        st.markdown("""
+        Backtesting adalah simulasi 'andai-andaian' berdasarkan data masa lalu untuk menguji keandalan sistem AI.
+        * **Equity Curve (Grafik Pertumbuhan Modal)**: Garis hijau menunjukkan pertumbuhan uang Anda jika disiplin mengikuti sinyal AI (Beli saat *Uptrend*, Jual/Cash saat *Downtrend*). Bandingkan dengan garis abu-abu (Hanya Beli & Tahan).
+        * **Max Drawdown (Risiko Terdalam)**: Angka ini menunjukkan persentase penurunan modal terdalam yang pernah terjadi dari titik puncaknya. Semakin kecil angkanya, semakin aman dan stabil strateginya.
+        * **Kesimpulan AI**: AI akan menyimpulkan secara otomatis apakah saham ini lebih cocok untuk di-*trading*-kan secara aktif menggunakan sistem, atau lebih baik dibeli dan disimpan jangka panjang.
+        """)
+        
+    with st.expander("📰 2. Cara Membaca Radar Sentimen Berita"):
+        st.markdown("""
+        Radar ini menggunakan teknologi NLP (*Natural Language Processing*) untuk membaca dan menilai emosi artikel berita di media finansial lokal.
+        * **Skor Sentimen**: 
+            * **Positif (> 0)**: Media sedang menyoroti hal baik (laba meroket, proyek baru, cuan, dividen).
+            * **Negatif (< 0)**: Media sedang memberikan sentimen buruk (utang, rugi, ARB, suspensi).
+        * **Strategi Penggunaan**: Gunakan berita murni sebagai **alat konfirmasi, bukan penentu utama**. Jika Screener menunjukkan sinyal **BUY**, dan Berita mengonfirmasi dengan sentimen **OPTIMIS**, maka probabilitas kemenangan Anda menjadi jauh lebih meyakinkan.
+        """)
+        
+    with st.expander("🗓️ 3. Cara Membaca Peta Musiman (Seasonality)"):
+        st.markdown("""
+        Fitur ini mendeteksi siklus berulang suatu saham dalam 10 tahun terakhir (seperti fenomena *Window Dressing* di akhir tahun).
+        * **Peta Heatmap**: Kotak berwarna hijau pekat berarti di bulan dan tahun tersebut, saham memberikan keuntungan yang besar. Kotak merah berarti saham sering anjlok.
+        * **Win Rate (%) per Bulan**: Jika bulan Desember memiliki Win Rate 90%, artinya dalam 10 tahun terakhir, 9 kali saham tersebut ditutup menghijau di akhir Desember.
+        * **Strategi Penggunaan**: Sangat cocok untuk *Swing Trading* jangka menengah. Cari saham yang memiliki riwayat *Win Rate* di atas 70% pada bulan yang akan datang, lalu lakukan akumulasi pembelian sebelum bulan tersebut tiba.
+        """)
+
+    st.divider()
+    
+    # --- BAGIAN FAQ & STRATEGI LAMA ---
     st.subheader("🧠 FAQ & Strategi Trading")
     with st.expander("🤔 1. Kenapa Status Saham di Screener & Chart Bisa Berbeda?"):
         st.markdown("Screener memindai data secara keseluruhan di malam hari (melihat tren besar), sedangkan Advanced Chart menganalisis pergerakan harga secara *live* detik ini juga. Gunakan Screener untuk mencari kandidat, dan Chart untuk eksekusi beli.")
 
     with st.expander("⏱️ 2. Apakah Data di Aplikasi Ini 100% Live?"):
         st.markdown("Ada jeda 10-15 menit dari pasar asli. Aplikasi ini dirancang untuk **Swing Trading** (menahan saham beberapa hari/minggu), bukan untuk *Scalping* harian. Waktu analisa terbaik adalah 15:30 WIB (menjelang bursa tutup).")
-
+        
+    with st.expander("🥇 3. Tiga Aturan Emas (Golden Rules) Trading"):
+        st.success("""
+        1. **Kombinasikan Data**: Jangan beli secara membabi buta. Pastikan Teknikal, Bandarmologi (Uang Asing), dan Sentimen Berita searah.
+        2. **Disiplin Stop Loss**: Selalu pasang *Stop Loss* (Batas Rugi) sesuai saran AI untuk melindungi modal Anda dari nyangkut berkepanjangan.
+        3. **Sabar di Fase Accumulation**: Saham di fase akumulasi harganya sangat aman, namun mungkin membutuhkan kesabaran ekstra sebelum bandar mulai menerbangkannya ke atas.
+        """)
 # --- 14.5 FITUR BARU: MESIN BACKTESTING (UJI SEJARAH STRATEGI) ---
 def show_backtesting(market_choice):
     st.header("🧪 Mesin Backtesting (Uji Strategi AI)")
+    # --- PROTEKSI VIP ---
+    if user_role == 'free':
+        st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+        st.info("""
+        **Kenapa Anda Membutuhkan Mesin Backtesting?**
+        Trading tanpa uji strategi seperti mengemudi dengan mata tertutup. Fitur ini memungkinkan Anda melihat performa strategi AI kami di masa lalu sebelum Anda mempertaruhkan uang sungguhan.
+        
+        **Apa yang didapatkan member VIP?**
+        * Simulasi pertumbuhan modal (Equity Curve) selama 3 tahun.
+        * Perbandingan performa Strategi AI vs Beli & Diam (Buy & Hold).
+        * Perhitungan risiko Drawdown (penurunan modal terdalam).
+        """)
+        st.button("Upgrade ke VIP Sekarang 🚀", key="bt_upgrade")
+        return # Menghentikan fungsi agar user free tidak bisa melihat input form
+    # --- END PROTEKSI ---
     st.markdown("Simulasikan performa strategi *Quant* jika Anda disiplin menerapkannya selama 3 tahun terakhir tanpa melibatkan emosi.")
 
     # Input Parameter
@@ -981,6 +1035,21 @@ def analyze_indonesian_sentiment(text):
 
 def show_news_sentiment(market_choice):
     st.header("📰 Radar Sentimen Berita Lokal")
+    # --- PROTEKSI VIP ---
+    if user_role == 'free':
+        st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+        st.info("""
+        **Kenapa Analisis Sentimen Itu Penting?**
+        Harga saham seringkali bergerak bukan karena angka, tapi karena emosi pasar. Radar ini menyapu ribuan berita untuk mendeteksi apakah pasar sedang optimis atau ketakutan.
+        
+        **Apa yang didapatkan member VIP?**
+        * Pemindaian otomatis ke seluruh portal media finansial utama Indonesia.
+        * Kesimpulan otomatis: Apakah berita cenderung Bullish atau Bearish?
+        * Akses langsung ke link berita yang menjadi katalis pergerakan saham.
+        """)
+        st.button("Upgrade ke VIP Sekarang 🚀", key="news_upgrade")
+        return
+    # --- END PROTEKSI ---
     st.markdown("Mesin pemindai yang memantau berita dari portal finansial top Indonesia untuk mencari katalis tersembunyi.")
 
     # Matikan fitur jika user sedang di Mode Wall Street
@@ -1058,6 +1127,21 @@ def show_news_sentiment(market_choice):
 # --- 14.7 FITUR BARU: PETA PROBABILITAS MUSIMAN (SEASONALITY HEATMAP) ---
 def show_seasonality(market_choice):
     st.header("🗓️ Peta Probabilitas Musiman (Seasonality)")
+    # --- PROTEKSI VIP ---
+    if user_role == 'free':
+        st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+        st.info("""
+        **Apa itu Seasonality (Musiman)?**
+        Bursa saham memiliki siklus berulang. Ada bulan di mana saham tertentu hampir selalu naik (seperti *Window Dressing*), dan bulan di mana ia hampir selalu turun.
+        
+        **Apa yang didapatkan member VIP?**
+        * Heatmap warna-warni performa bulanan selama 10 tahun terakhir.
+        * Win-Rate (%) per bulan: Seberapa sering saham ini "hijau" di bulan tertentu?
+        * Statistik bulan terbaik vs bulan paling berbahaya untuk setiap emiten.
+        """)
+        st.button("Upgrade ke VIP Sekarang 🚀", key="season_upgrade")
+        return
+    # --- END PROTEKSI ---
     st.markdown("Mendeteksi pola siklus bulanan saham dalam 10 tahun terakhir (Misal: Fenomena *Window Dressing* atau *Sell in May*).")
 
     with st.form(key='season_form'):
