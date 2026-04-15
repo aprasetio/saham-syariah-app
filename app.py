@@ -1063,7 +1063,7 @@ def show_seasonality(market_choice):
     with st.form(key='season_form'):
         col1, col2 = st.columns([3, 1])
         with col1:
-            ticker = st.text_input("🔍 Kode Saham (Contoh: BBCA / AAPL):", "").upper()
+            ticker = st.text_input("🔍 Kode Saham (Contoh: BBCA / BUMI):", "").upper()
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_season = st.form_submit_button("Analisis Siklus 🔍", use_container_width=True)
@@ -1075,19 +1075,35 @@ def show_seasonality(market_choice):
             ticker_only = ticker.replace(".JK", "")
 
             try:
-                # Menarik data historis panjang
-                df = yf.download(symbol, period="10y", interval="1d", progress=False)
+                # PERBAIKAN 1: Tambahkan auto_adjust=True untuk menstabilkan data Yfinance
+                df = yf.download(symbol, period="10y", interval="1d", auto_adjust=True, progress=False)
+                
                 if df.empty:
-                    st.error("❌ Data saham tidak ditemukan atau usia saham belum cukup.")
+                    st.error(f"❌ Data saham {ticker_only} tidak ditemukan. Pastikan kodenya benar.")
+                    return
+                
+                # PERBAIKAN 2: Rata-ratakan kolom jika berbentuk MultiIndex (Mencegah Error di BUMI)
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+
+                # Ekstrak menjadi Series tunggal agar tidak terjadi Error Scalar
+                close_data = df['Close'].squeeze()
+                
+                if close_data.empty or len(close_data) < 30:
+                    st.warning("⚠️ Usia saham di bursa belum mencukupi (Terlalu baru).")
                     return
 
-                # Mengambil harga penutupan akhir bulan
-                df_monthly = df['Close'].resample('ME').last()
+                # Mengambil harga penutupan akhir bulan (Anti-Error untuk Pandas Lama & Baru)
+                try:
+                    df_monthly = close_data.resample('ME').last()
+                except:
+                    df_monthly = close_data.resample('M').last()
                 
                 # Menghitung persentase perubahan dari bulan ke bulan
                 returns = df_monthly.pct_change() * 100
-                df_ret = pd.DataFrame({'Return': returns})
-                df_ret = df_ret.dropna()
+                
+                # PERBAIKAN 3: Gunakan .to_frame() untuk mematikan Error "Scalar Values" mutlak
+                df_ret = returns.to_frame(name='Return').dropna()
                 
                 # Memisahkan Tahun dan Bulan
                 df_ret['Year'] = df_ret.index.year
@@ -1107,9 +1123,13 @@ def show_seasonality(market_choice):
                 # Menghitung Statistik Utama per Bulan
                 win_rate = (pivot > 0).sum() / pivot.notna().sum() * 100
                 avg_return = pivot.mean()
+                
+                # Bersihkan NaN (kosong) jika ada bulan yang belum terjadi
+                win_rate = win_rate.fillna(0)
+                avg_return = avg_return.fillna(0)
 
                 # --- DASHBOARD KESIMPULAN ---
-                st.subheader(f"📊 Rapor Siklus {ticker_only} (Histori 10 Tahun)")
+                st.subheader(f"📊 Rapor Siklus {ticker_only} (Histori s.d 10 Tahun)")
                 
                 # Mencari bulan terbaik dan terburuk
                 best_month_idx = avg_return.idxmax()
