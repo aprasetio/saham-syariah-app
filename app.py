@@ -879,7 +879,7 @@ def show_backtesting(market_choice):
         st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
         st.info("""
         **Kenapa Anda Membutuhkan Mesin Backtesting?**
-        Trading tanpa uji strategi seperti mengemudi dengan mata tertutup. Fitur ini memungkinkan Anda melihat performa strategi AI kami di masa lalu sebelum Anda mempertaruhkan uang sungguhan.
+        Trading tanpa uji strategi seperti mengemudi dengan mata tertutup. Fitur ini memungkinkan Anda melihat performa strategi AI kami di masa lalu sebelum Anda melakukan trading saham di dunia nyata.
         
         **Apa yang didapatkan member VIP?**
         * Simulasi pertumbuhan modal (Equity Curve) selama 3 tahun.
