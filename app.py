@@ -1035,7 +1035,10 @@ def analyze_indonesian_sentiment(text):
 
 def show_news_sentiment(market_choice):
     st.header("📰 Radar Sentimen Berita Lokal")
+    st.markdown("Mesin pemindai yang memantau berita dari portal finansial top Indonesia untuk mencari katalis tersembunyi.")
+
     # --- PROTEKSI VIP ---
+    # Memastikan user_role terdeteksi dengan aman
     if user_role == 'free':
         st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
         st.info("""
@@ -1050,7 +1053,6 @@ def show_news_sentiment(market_choice):
         st.button("Upgrade ke VIP Sekarang 🚀", key="news_upgrade")
         return
     # --- END PROTEKSI ---
-    st.markdown("Mesin pemindai yang memantau berita dari portal finansial top Indonesia untuk mencari katalis tersembunyi.")
 
     # Matikan fitur jika user sedang di Mode Wall Street
     if "US" in market_choice:
@@ -1066,15 +1068,15 @@ def show_news_sentiment(market_choice):
             submit_news = st.form_submit_button("Radar Berita 🔍", use_container_width=True)
 
     if submit_news and ticker:
-        with st.spinner(f"📡 Radar sedang menyapu portal berita lokal untuk saham {ticker}..."):
+        with st.spinner(f"📡 Radar sedang menyapu seluruh portal berita lokal untuk saham {ticker}..."):
             ticker_only = ticker.replace(".JK", "")
 
             try:
-                # Memanggil data dari fungsi penyedot RSS
+                # Memanggil data dari fungsi penyedot RSS (Google News Tracker)
                 berita_lokal = fetch_local_news(ticker_only)
 
                 if not berita_lokal:
-                    st.warning(f"⚠️ Radar tidak menemukan berita terbaru yang menyebutkan saham {ticker_only} di CNBC atau Kontan hari ini.")
+                    st.warning(f"⚠️ Radar tidak menemukan berita terbaru yang menyebutkan saham {ticker_only} di media Indonesia hari ini.")
                     st.info("💡 Tips: Coba gunakan saham berkapitalisasi besar atau saham yang sedang ramai ditransaksikan.")
                     return
 
