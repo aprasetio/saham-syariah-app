@@ -17,10 +17,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # DAFTAR SAHAM
 SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
-# 20 Saham Raksasa Wall Street (Bisa Anda tambah/ubah nanti)
+# 20 Saham Raksasa Wall Street
 US_STOCKS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "LLY", "JPM", "V", "MA", "UNH", "HD", "PG", "COST", "JNJ", "NFLX", "AMD", "CRM"]
 
-# --- 2. FUNGSI TEKNIKAL (TETAP SAMA) ---
+# --- 2. FUNGSI TEKNIKAL ---
 def check_candlestick_patterns(curr, prev):
     score = 0; patterns = []
     try:
@@ -50,13 +50,12 @@ def get_benchmark_data(ticker):
 def get_target_date(df):
     return df.index[-1].strftime('%Y-%m-%d')
 
-# --- 3. MESIN UTAMA (DIBUNGKUS DALAM FUNGSI AGAR BISA DIPAKAI 2 PASAR) ---
+# --- 3. MESIN UTAMA ---
 def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goapi=False):
     print(f"\n[{datetime.now(timezone.utc)}] 🚀 Memulai Scan & AI Predictor untuk {market_name}...")
     
     bm_df = get_benchmark_data(benchmark_ticker)
     
-    # Tambahkan .JK hanya jika pasar Indonesia (use_goapi = True)
     tickers = [f"{s}.JK" if use_goapi else s for s in stock_list]
     price_data = yf.download(tickers, period="2y", group_by='ticker', auto_adjust=True, progress=False, threads=True) 
 
@@ -72,24 +71,32 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
             df = df[df['Volume'] > 0]
             if df.empty or len(df) < 50: continue
 
-            # Filter volume: 5 Juta untuk IDX, 1 Juta untuk Wall Street
             min_vol = 5000000 if use_goapi else 1000000
             if df['Volume'].iloc[-1] < min_vol: continue
 
             target_date = get_target_date(df)
 
+            # --- PERHITUNGAN INDIKATOR TEKNIKAL LAMA & BARU ---
             df['Rsi'] = df.ta.rsi(length=14)
             macd = df.ta.macd(fast=12, slow=26, signal=9)
             bbands = df.ta.bbands(length=20, std=2)
             
+            # [FITUR BARU] Tambahan Stochastic K(14,3)
+            stoch = df.ta.stoch(high=df['High'], low=df['Low'], close=df['Close'], k=14, d=3)
+            
             to_concat = [df]
             if macd is not None: to_concat.append(macd)
             if bbands is not None: to_concat.append(bbands)
+            if stoch is not None: to_concat.append(stoch) # Gabungkan Stochastic
             df = pd.concat(to_concat, axis=1)
 
             df['SMA20'] = df.ta.sma(length=20); df['SMA50'] = df.ta.sma(length=50)
             df['SMA100'] = df.ta.sma(length=100); df['EMA200'] = df.ta.ema(length=200)
             df['ATR'] = df.ta.atr(length=14)
+            
+            # [FITUR BARU] Rata-rata Volume & Value 5 Hari
+            df['SMA5_Volume'] = df['Volume'].rolling(window=5).mean()
+            df['SMA5_Value'] = (df['Close'] * df['Volume']).rolling(window=5).mean()
 
             donchian = df.ta.donchian(lower_length=20, upper_length=20)
             if donchian is not None: df = pd.concat([df, donchian], axis=1)
@@ -106,7 +113,7 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
                 df['Stock_Ret_20'] = (df['Close'] - df['Close'].shift(20)) / df['Close'].shift(20)
                 df['BM_Ret_20'] = (df['BM_Close'] - df['BM_Close'].shift(20)) / df['BM_Close'].shift(20)
 
-            # Fitur AI (KNN) Tetap Utuh
+            # Fitur AI (KNN)
             prob_up = 0.5
             try:
                 df['Target_Besok'] = (df['Close'].shift(-1) > df['Close']).astype(int)
@@ -128,6 +135,8 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
             ret_20 = curr.get('Stock_Ret_20', 0) 
 
             score = 0; reasons = []
+            
+            # Kriteria Lama
             if curr['Close'] > curr.get('EMA200', 0): score += 1; reasons.append("📈 Uptrend")
             if ret_20 > curr.get('BM_Ret_20', 0): score += 1.5; reasons.append("🌟 Market Beat")
             if curr.get('CMF', 0) > 0.1: score += 2; reasons.append("🐳 CMF")
@@ -139,6 +148,30 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
             
             if prob_up >= 0.7: score += 2.0; reasons.append(f"🤖 AI Bullish ({int(prob_up*100)}%)")
             
+            # --- [FITUR BARU] LOGIKA KEY REVERSAL ---
+            try:
+                stoch_k = curr.get('STOCHk_14_3_3', 50)
+                sma5_val = curr.get('SMA5_Value', 0)
+                sma5_vol = curr.get('SMA5_Volume', 0)
+                
+                # Syarat Volume & Value (10.000 lot = 1.000.000 lembar saham)
+                syarat_likuiditas = (sma5_val > 1000000000) and (sma5_vol > 1000000)
+                
+                # Jika Wall Street, nilai 1M IDR setara $60k (Pasti tembus), jadi likuiditas diabaikan.
+                if not use_goapi: syarat_likuiditas = True 
+                
+                if (stoch_k < 20) and \
+                   (prev['Close'] < prev['Open']) and \
+                   (curr['Close'] > curr['Open']) and \
+                   (curr['Low'] < prev['Low']) and \
+                   (curr['Close'] > prev['High']) and \
+                   syarat_likuiditas:
+                    
+                    score += 2.0 # Tambahan skor super untuk Reversal Bawah
+                    reasons.append("🔥 KEY REVERSAL")
+            except Exception as e: pass
+            # --- END LOGIKA BARU ---
+
             s_candle, p_candle = check_candlestick_patterns(curr, prev)
             score += s_candle
             reasons.extend(p_candle)
@@ -227,7 +260,6 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
             target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
             stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
 
-            # Format Harga: JII30 Rupiah (Int), Wall Street Dollar (2 Desimal)
             format_harga = lambda x: int(x) if use_goapi else round(float(x), 2)
 
             results.append({
@@ -244,7 +276,6 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
             })
             print(f"✅ LOLOS ({market_name}): {symbol} | Katalis: {', '.join(reasons)}")
 
-    # Fitur "CASH IS KING" Tetap Utuh
     if not results:
         wib_date = (datetime.now(timezone.utc) + timedelta(hours=7)).strftime('%Y-%m-%d')
         results.append({
@@ -261,35 +292,26 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
     supabase.table(table_name).insert(results).execute()
     print(f"[{datetime.now(timezone.utc)}] 🎉 Sukses menyimpan ke tabel: {table_name}")
 
-
-
-# --- 4. EKSEKUSI JADWAL CRON (SMART SCHEDULER) ---
+# --- 4. EKSEKUSI JADWAL CRON ---
 if __name__ == "__main__":
     import os
     
-    # Cek jam saat robot berjalan (dalam waktu UTC)
     current_utc_hour = datetime.now(timezone.utc).hour
-    
-    # Deteksi apakah robot dijalankan secara manual (Tombol di GitHub)
     is_manual_run = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
-    # LOGIKA 1: JIKA TOMBOL DITEKAN MANUAL (Abaikan Jam)
     if is_manual_run:
         print("🚨 Tombol MANUAL ditekan! Mengeksekusi Kedua Pasar secara berurutan...")
         run_screener("JII30 (Indonesia)", SHARIA_STOCKS, "^JKSE", "jii30_daily_data", use_goapi=True)
         run_screener("Wall Street (US)", US_STOCKS, "^GSPC", "us_daily_data", use_goapi=False)
 
-    # LOGIKA 2: SHIFT 1 - Sekitar jam 19:00 WIB (Sama dengan 12:00 UTC)
     elif 10 <= current_utc_hour <= 15:
         print("🕒 Mode Auto Shift 1 (Malam): Mengeksekusi Pasar Indonesia...")
         run_screener("JII30 (Indonesia)", SHARIA_STOCKS, "^JKSE", "jii30_daily_data", use_goapi=True)
 
-    # LOGIKA 3: SHIFT 2 - Sekitar jam 05:00 WIB (Sama dengan 22:00 UTC)
     elif 20 <= current_utc_hour <= 23 or 0 <= current_utc_hour <= 2:
         print("🕒 Mode Auto Shift 2 (Pagi): Mengeksekusi Pasar Wall Street...")
         run_screener("Wall Street (US)", US_STOCKS, "^GSPC", "us_daily_data", use_goapi=False)
 
-    # LOGIKA 4: Keamanan tambahan jika Cron jalan di luar jadwal
     else:
         print("🕒 Mode Fallback: Mengeksekusi Kedua Pasar...")
         run_screener("JII30 (Indonesia)", SHARIA_STOCKS, "^JKSE", "jii30_daily_data", use_goapi=True)
