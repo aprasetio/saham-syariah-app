@@ -692,9 +692,18 @@ def show_chart(use_idx_data, market_choice):
                 c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Sistem Dark Pools (US)", delta_color="off")
             elif net_foreign is not None and (net_foreign != 0 or avg_buy_price != 0):
                 power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
-                c3.metric(f"Asing ({'🟢 AKUM' if net_foreign > 0 else '🔴 DISTRIB'})", format_rupiah(net_foreign), f"Dominasi: {power_pct:.1f}% | Modal: Rp {int(avg_buy_price):,}", delta_color="normal" if net_foreign > 0 else "inverse")
+                
+                # CAPPING: Tangkap anomali Pasar Nego atau Delay YF
+                if power_pct > 100:
+                    power_display = ">100% (Ada Block/Nego)"
+                else:
+                    power_display = f"{power_pct:.1f}%"
+                    
+                c3.metric(f"Asing ({'🟢 AKUM' if net_foreign > 0 else '🔴 DISTRIB'})", format_rupiah(net_foreign), f"Dominasi: {power_display} | Modal: Rp {int(avg_buy_price):,}", delta_color="normal" if net_foreign > 0 else "inverse")
+            elif net_foreign == 0 and avg_buy_price == 0 and use_idx_data:
+                c3.metric("Data Bandar (Asing)", "Gagal Akses API", "Server IDX Sibuk / Timeout", delta_color="off")
             else:
-                c3.metric("Data Bandar (Asing)", "Tidak Tersedia / Gagal", "Mode Standar / Kuota Habis", delta_color="off")
+                c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Standar / Kuota Habis", delta_color="off")
 
             if prob_up >= 0.7: ai_status, ai_color = "🔥 Sinyal Bullish", "normal"
             elif prob_up < 0.5: ai_status, ai_color = "-❄️ Sinyal Bearish", "normal"
