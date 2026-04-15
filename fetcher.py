@@ -216,7 +216,9 @@ def run_screener(market_name, stock_list, benchmark_ticker, table_name, use_goap
                         sell_val = sum(b['value'] for b in data if b['side'] == 'SELL')
                         net_foreign = buy_val - sell_val
                         if buy_lot > 0: avg_buy_price = buy_val / (buy_lot * 100)
-                        if (close * volume) > 0: power_pct = (abs(net_foreign) / (close * volume)) * 100
+                        if (close * volume) > 0: 
+                            power_pct = (abs(net_foreign) / (close * volume)) * 100
+                            if power_pct > 100: power_pct = 100.0  # Capping maksimal 100%
                 except: pass
                 
                 # Syarat Lolos Asing (Hanya Berlaku di Indo)
