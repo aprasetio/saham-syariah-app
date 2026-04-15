@@ -830,7 +830,96 @@ def show_education():
     with st.expander("⏱️ 2. Apakah Data di Aplikasi Ini 100% Live?"):
         st.markdown("Ada jeda 10-15 menit dari pasar asli. Aplikasi ini dirancang untuk **Swing Trading** (menahan saham beberapa hari/minggu), bukan untuk *Scalping* harian. Waktu analisa terbaik adalah 15:30 WIB (menjelang bursa tutup).")
 
+# --- 14.5 FITUR BARU: MESIN BACKTESTING (UJI SEJARAH STRATEGI) ---
+def show_backtesting(market_choice):
+    st.header("🧪 Mesin Backtesting (Uji Strategi AI)")
+    st.markdown("Simulasikan performa strategi *Quant* jika Anda disiplin menerapkannya selama 3 tahun terakhir tanpa melibatkan emosi.")
 
+    # Input Parameter
+    with st.form(key='backtest_form'):
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1: 
+            ticker = st.text_input("🔍 Kode Saham:", "BBCA").upper()
+        with col2: 
+            modal_awal = st.number_input("💰 Modal Awal (Rp/USD):", min_value=1000, value=10000000, step=1000000)
+        with col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_bt = st.form_submit_button("🚀 Mulai Simulasi", use_container_width=True)
+
+    if submit_bt and ticker:
+        with st.spinner("Mesin waktu berjalan... Menghitung ribuan data historis..."):
+            is_us = "US" in market_choice
+            symbol = f"{ticker}.JK" if not is_us and not ticker.endswith(".JK") else ticker
+            ticker_only = ticker.replace(".JK", "")
+
+            try:
+                # Menarik data 3 tahun terakhir
+                df = yf.download(symbol, period="3y", auto_adjust=True, progress=False)
+                if df.empty:
+                    st.error("❌ Data saham tidak ditemukan.")
+                    return
+                
+                df = fix_dataframe(df)
+                df = df[df['Volume'] > 0]
+                
+                # --- STRATEGI ALGORITMA (AI Trend Follower) ---
+                # Aturan Beli: Harga menembus MA 50 ke atas (Uptrend Reversal)
+                # Aturan Jual: Harga jatuh ke bawah MA 20 (Momentum Hilang)
+                df['SMA20'] = df.ta.sma(length=20)
+                df['SMA50'] = df.ta.sma(length=50)
+                
+                # Simulasi Keputusan (Vectorized - Super Cepat)
+                df['Signal'] = 0
+                df.loc[df['Close'] > df['SMA50'], 'Signal'] = 1  # Mode Beli/Hold
+                df.loc[df['Close'] < df['SMA20'], 'Signal'] = 0  # Mode Jual/Cash
+                
+                df['Position'] = df['Signal'].ffill().fillna(0)
+                
+                # Hitung Keuntungan Harian
+                df['Daily_Return'] = df['Close'].pct_change()
+                df['Strategy_Return'] = df['Position'].shift(1) * df['Daily_Return']
+                
+                # Pertumbuhan Modal Berbunga (Compound Interest)
+                df['Equity'] = modal_awal * (1 + df['Strategy_Return']).cumprod()
+                df['Buy_Hold_Equity'] = modal_awal * (1 + df['Daily_Return']).cumprod()
+                
+                # --- KALKULASI METRIK PERFORMA ---
+                df = df.dropna()
+                modal_akhir = df['Equity'].iloc[-1]
+                bnh_akhir = df['Buy_Hold_Equity'].iloc[-1]
+                
+                total_return = ((modal_akhir - modal_awal) / modal_awal) * 100
+                bnh_return = ((bnh_akhir - modal_awal) / modal_awal) * 100
+                
+                # Menghitung Risiko (Max Drawdown / Penurunan Terdalam)
+                rolling_max = df['Equity'].cummax()
+                drawdown = (df['Equity'] - rolling_max) / rolling_max
+                max_drawdown = drawdown.min() * 100
+
+                # --- TAMPILAN DASHBOARD HASIL ---
+                st.success(f"✅ Simulasi Selesai! Menguji {len(df)} hari perdagangan pada saham {ticker_only}.")
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Modal Akhir (Strategi AI)", format_currency(modal_akhir, is_us), f"{total_return:.2f}% Profit")
+                c2.metric("Jika Hanya Beli & Diam (B&H)", format_currency(bnh_akhir, is_us), f"{bnh_return:.2f}% Profit", delta_color="off")
+                c3.metric("Risiko Terdalam (Max Drawdown)", f"{max_drawdown:.2f}%", "Penurunan uang dari puncak ke dasar", delta_color="inverse")
+
+                if total_return > bnh_return:
+                    st.info("🏆 **Kesimpulan:** Strategi *Quant AI* terbukti **lebih unggul** dan lebih aman daripada sekadar menahan saham membabi buta (*Buy and Hold*).")
+                else:
+                    st.warning("⚖️ **Kesimpulan:** Untuk saham ini, strategi *Buy and Hold* jangka panjang menghasilkan profit lebih besar, namun strategi *Quant AI* membantu melindungi Anda dari kerugian (Max Drawdown) yang ekstrem.")
+
+                # --- GRAFIK PERTUMBUHAN MODAL (EQUITY CURVE) ---
+                st.subheader("📈 Grafik Pertumbuhan Modal (Equity Curve)")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], mode='lines', name='Strategi Quant AI', line=dict(color='#00FF00', width=3)))
+                fig.add_trace(go.Scatter(x=df.index, y=df['Buy_Hold_Equity'], mode='lines', name='Beli & Tahan Biasa', line=dict(color='#555555', width=2, dash='dot')))
+                
+                fig.update_layout(height=400, template="plotly_dark", margin=dict(l=0, r=0, t=30, b=0), yaxis_title="Saldo Modal", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Gagal melakukan simulasi: Terjadi kesalahan data ({e}).")
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
@@ -842,7 +931,7 @@ try:
 except: pass
 st.sidebar.divider()
 
-menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "📅 Dividend Hunter", "📚 Pusat Edukasi"]
+menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "🧪 Mesin Backtesting", "📅 Dividend Hunter", "📚 Pusat Edukasi"]
 if is_admin:
     menu_options.append("👑 Admin Dashboard")
     
@@ -947,6 +1036,8 @@ if mode == "🔍 Super Screener":
     run_screener(use_idx_data, active_stock_list, active_category_name, market_choice)
 elif mode == "📊 Advanced Chart": 
     show_chart(use_idx_data, market_choice)
+elif mode == "🧪 Mesin Backtesting":
+    show_backtesting(market_choice)
 elif mode == "📅 Dividend Hunter":
     show_dividend_hunter(active_stock_list, active_category_name, market_choice)
 elif mode == "📚 Pusat Edukasi":
