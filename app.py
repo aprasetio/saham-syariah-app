@@ -1272,7 +1272,17 @@ try:
 except: pass
 st.sidebar.divider()
 
-menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "🧪 Mesin Backtesting", "📰 Radar Sentimen Berita", "🗓️ Peta Musiman", "📅 Dividend Hunter", "📚 Pusat Edukasi"]
+# DAFTAR MENU (Pastikan teks & emoji ini sama persis dengan bagian Routing di bawah)
+menu_options = [
+    "🔍 Super Screener", 
+    "📊 Advanced Chart", 
+    "🧪 Mesin Backtesting", 
+    "📰 Radar Sentimen Berita", 
+    "🗓️ Peta Musiman", 
+    "📅 Dividend Hunter", 
+    "📚 Pusat Edukasi"
+]
+
 if is_admin:
     menu_options.append("👑 Admin Dashboard")
     
@@ -1373,19 +1383,26 @@ Perdagangan saham memiliki risiko kerugian finansial yang tinggi. Segala keputus
 """, unsafe_allow_html=True)
 
 # --- MENJALANKAN APLIKASI UTAMA ---
-if mode == "🔍 Super Screener": 
+if mode == "🔍 Super Screener":
     run_screener(use_idx_data, active_stock_list, active_category_name, market_choice)
-elif mode == "📊 Advanced Chart": 
+
+elif mode == "📊 Advanced Chart":
     show_chart(use_idx_data, market_choice)
+
 elif mode == "🧪 Mesin Backtesting":
     show_backtesting(market_choice)
-elif mode == "📅 Dividend Hunter":
-    show_dividend_hunter(active_stock_list, active_category_name, market_choice)
-elif mode == "📚 Pusat Edukasi":
-    show_education()
-elif mode == "👑 Admin Dashboard" and is_admin:
-    show_admin_dashboard()
-elif mode == "📰 Analisis Sentimen Berita":
+
+elif mode == "📰 Radar Sentimen Berita":
     show_news_sentiment(market_choice)
+
 elif mode == "🗓️ Peta Musiman":
     show_seasonality(market_choice)
+
+elif mode == "📅 Dividend Hunter":
+    show_dividend_hunter(active_stock_list, active_category_name, market_choice)
+
+elif mode == "📚 Pusat Edukasi":
+    show_education()
+
+elif mode == "👑 Admin Dashboard" and is_admin:
+    show_admin_dashboard()
