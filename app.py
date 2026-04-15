@@ -9,7 +9,8 @@ import numpy as np
 import time
 from datetime import datetime, timedelta
 from supabase import create_client, Client
-from textblob import TextBlob
+import feedparser
+import re
 
 # --- IMPORT MACHINE LEARNING ---
 from sklearn.neighbors import KNeighborsClassifier
@@ -921,96 +922,125 @@ def show_backtesting(market_choice):
 
             except Exception as e:
                 st.error(f"Gagal melakukan simulasi: Terjadi kesalahan data ({e}).")
-# --- 14.6 FITUR BARU: ANALISIS SENTIMEN BERITA (NLP) ---
+# --- 14.6 FITUR BARU: RADAR SENTIMEN BERITA LOKAL (CNBC & KONTAN) ---
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_local_news(ticker):
+    # Menyedot langsung dari jantung media finansial Indonesia
+    rss_urls = [
+        "https://www.cnbcindonesia.com/market/rss",
+        "https://investasi.kontan.co.id/rss"
+    ]
+    
+    news_list = []
+    for url in rss_urls:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries:
+                title = entry.title
+                link = entry.link
+                # Filter: Hanya ambil berita yang menyebutkan kode saham yang dicari user
+                if ticker.lower() in title.lower() or ticker.lower() in entry.get('summary', '').lower():
+                    publisher = "CNBC Indonesia" if "cnbc" in url else "Kontan"
+                    news_list.append({"title": title, "link": link, "publisher": publisher, "date": entry.get('published', '')})
+        except:
+            continue
+    return news_list
+
+def analyze_indonesian_sentiment(text):
+    # Kamus NLP sederhana khusus bahasa gaul saham Indonesia
+    kata_positif = ['naik', 'cuan', 'laba', 'untung', 'dividen', 'terbang', 'akumulasi', 'positif', 'rekor', 'melonjak', 'melesat', 'tumbuh', 'meroket', 'bullish', 'borong', 'lonjakan']
+    kata_negatif = ['turun', 'rugi', 'anjlok', 'arb', 'distribusi', 'negatif', 'utang', 'suspensi', 'jeblok', 'merosot', 'hancur', 'jatuh', 'bearish', 'gagal', 'koreksi', 'dilepas', 'jual']
+    
+    text_lower = text.lower()
+    score = 0
+    
+    # Deteksi sentimen
+    for kata in kata_positif:
+        if re.search(r'\b' + kata + r'\b', text_lower): score += 1
+    for kata in kata_negatif:
+        if re.search(r'\b' + kata + r'\b', text_lower): score -= 1
+        
+    if score > 0: return "🟢 POSITIF", score
+    elif score < 0: return "🔴 NEGATIF", score
+    else: return "⚪ NETRAL", score
+
 def show_news_sentiment(market_choice):
-    st.header("📰 Analisis Sentimen Berita (NLP)")
-    st.markdown("AI akan membaca dan menyimpulkan emosi pasar dari puluhan judul berita terbaru (Sumber: Yahoo Finance Global).")
+    st.header("📰 Radar Sentimen Berita Lokal")
+    st.markdown("Mesin pemindai yang memantau berita dari portal finansial top Indonesia (CNBC & Kontan) untuk mencari katalis tersembunyi.")
+
+    # Matikan fitur jika user sedang di Mode Wall Street
+    if "US" in market_choice:
+        st.warning("⚠️ Radar Berita Lokal dinonaktifkan di mode Wall Street. Silakan pindah ke bursa Indonesia.")
+        return
 
     with st.form(key='news_form'):
         col1, col2 = st.columns([3, 1])
         with col1:
-            ticker = st.text_input("🔍 Kode Saham (Contoh: BBRI / NVDA):", "").upper()
+            ticker = st.text_input("🔍 Kode Saham (Contoh: WIKA / BBCA / GOTO):", "").upper()
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
-            submit_news = st.form_submit_button("Baca Berita 🔍", use_container_width=True)
+            submit_news = st.form_submit_button("Radar Berita 🔍", use_container_width=True)
 
     if submit_news and ticker:
-        with st.spinner(f"🧠 AI NLP sedang membaca artikel tentang {ticker}..."):
-            is_us = "US" in market_choice
-            symbol = f"{ticker}.JK" if not is_us and not ticker.endswith(".JK") else ticker
+        with st.spinner(f"📡 Radar sedang menyapu portal berita lokal untuk saham {ticker}..."):
             ticker_only = ticker.replace(".JK", "")
 
             try:
-                # Menarik berita terbaru dari API Yahoo Finance
-                saham = yf.Ticker(symbol)
-                berita = saham.news
+                # Memanggil data dari fungsi penyedot RSS
+                berita_lokal = fetch_local_news(ticker_only)
 
-                if not berita:
-                    st.warning(f"⚠️ Tidak ada berita global terbaru yang ditemukan untuk saham {ticker_only}.")
+                if not berita_lokal:
+                    st.warning(f"⚠️ Radar tidak menemukan berita terbaru yang menyebutkan saham {ticker_only} di CNBC atau Kontan hari ini.")
+                    st.info("💡 Tips: Coba gunakan saham berkapitalisasi besar atau saham yang sedang ramai ditransaksikan.")
                     return
 
-                total_polarity = 0
-                valid_news = 0
+                total_score = 0
                 news_items = []
 
-                # AI Membaca satu per satu
-                for item in berita:
-                    title = item.get('title', '')
-                    publisher = item.get('publisher', 'Unknown')
-                    link = item.get('link', '#')
-                    
-                    if title:
-                        # Proses NLP TextBlob (Fokus pada bahasa Inggris keuangan global)
-                        analysis = TextBlob(title)
-                        polarity = analysis.sentiment.polarity 
-                        
-                        total_polarity += polarity
-                        valid_news += 1
-                        
-                        if polarity > 0.1: sentiment_label = "🟢 POSITIF"
-                        elif polarity < -0.1: sentiment_label = "🔴 NEGATIF"
-                        else: sentiment_label = "⚪ NETRAL"
-                        
-                        news_items.append({
-                            "title": title,
-                            "publisher": publisher,
-                            "sentiment": sentiment_label,
-                            "link": link,
-                            "score": polarity
-                        })
+                # Analisis satu per satu dengan Kamus Bahasa Indonesia
+                for item in berita_lokal:
+                    sentiment_label, score = analyze_indonesian_sentiment(item['title'])
+                    total_score += score
+                    news_items.append({
+                        "title": item['title'],
+                        "publisher": item['publisher'],
+                        "sentiment": sentiment_label,
+                        "link": item['link'],
+                        "score": score,
+                        "date": item['date']
+                    })
 
-                if valid_news > 0:
-                    avg_polarity = total_polarity / valid_news
+                avg_score = total_score / len(berita_lokal)
+                
+                # --- DASHBOARD KESIMPULAN ---
+                st.subheader(f"🧠 Kesimpulan Radar Sentimen {ticker_only}")
+                c1, c2 = st.columns(2)
+                
+                if avg_score > 0:
+                    status_berita = "🐂 OPTIMIS (Banyak Kabar Baik)"
+                    warna = "normal"
+                elif avg_score < 0:
+                    status_berita = "🐻 PESIMIS (Banyak Kabar Buruk)"
+                    warna = "inverse"
+                else:
+                    status_berita = "⚖️ NETRAL (Minim Sentimen)"
+                    warna = "off"
                     
-                    # --- DASHBOARD KESIMPULAN ---
-                    st.subheader(f"🧠 Kesimpulan AI untuk {ticker_only}")
-                    c1, c2 = st.columns(2)
-                    
-                    if avg_polarity > 0.15:
-                        status_berita = "🐂 BULLISH (Sangat Positif)"
-                        warna = "normal"
-                    elif avg_polarity < -0.05:
-                        status_berita = "🐻 BEARISH (Negatif)"
-                        warna = "inverse"
-                    else:
-                        status_berita = "⚖️ NETRAL"
-                        warna = "off"
+                c1.metric("Kondisi Emosi Media", status_berita, f"Skor Sentimen: {avg_score:.1f}", delta_color=warna)
+                c2.info("Sistem secara pintar memindai kata kunci finansial (seperti laba, cuan, rugi, ARB) dari artikel lokal yang baru saja dirilis.")
+                
+                st.divider()
+                
+                # --- DAFTAR BERITA YANG DIBACA AI ---
+                st.subheader("📑 Arsip Berita yang Terdeteksi")
+                for item in news_items:
+                    with st.expander(f"{item['sentiment']} | {item['title']}"):
+                        st.write(f"**Sumber:** {item['publisher']} | **Waktu Terbit:** {item['date']}")
+                        st.markdown(f"[🔗 Baca artikel selengkapnya di sini]({item['link']})")
                         
-                    c1.metric("Sentimen Emosi Pasar", status_berita, f"Skor Polarity: {avg_polarity:.2f}", delta_color=warna)
-                    c2.info("Skor Polarity diukur dari -1.0 (Kepanikan Ekstrem) hingga +1.0 (Euforia Ekstrem). Analisis menggunakan metode pemrosesan bahasa alami (NLP).")
-                    
-                    st.divider()
-                    
-                    # --- DAFTAR BERITA YANG DIBACA AI ---
-                    st.subheader("📑 Rincian Judul Berita yang Dianalisis")
-                    for item in news_items:
-                        with st.expander(f"{item['sentiment']} | {item['title']}"):
-                            st.write(f"**Sumber:** {item['publisher']}")
-                            st.write(f"**Skor Matematis NLP:** {item['score']:.2f}")
-                            st.markdown(f"[🔗 Baca artikel asli di sini]({item['link']})")
-                            
             except Exception as e:
-                st.error(f"Gagal menganalisis berita: Terjadi kesalahan jaringan ({e}).")
+                st.error(f"Gagal menyapu berita lokal: {e}")
 
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
