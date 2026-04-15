@@ -6,3 +6,4 @@ plotly
 requests
 supabase
 scikit-learn
+textblob
