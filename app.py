@@ -1055,7 +1055,106 @@ def show_news_sentiment(market_choice):
                         
             except Exception as e:
                 st.error(f"Gagal menyapu berita lokal: {e}")
+# --- 14.7 FITUR BARU: PETA PROBABILITAS MUSIMAN (SEASONALITY HEATMAP) ---
+def show_seasonality(market_choice):
+    st.header("🗓️ Peta Probabilitas Musiman (Seasonality)")
+    st.markdown("Mendeteksi pola siklus bulanan saham dalam 10 tahun terakhir (Misal: Fenomena *Window Dressing* atau *Sell in May*).")
 
+    with st.form(key='season_form'):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            ticker = st.text_input("🔍 Kode Saham (Contoh: BBCA / AAPL):", "").upper()
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_season = st.form_submit_button("Analisis Siklus 🔍", use_container_width=True)
+
+    if submit_season and ticker:
+        with st.spinner(f"Menarik data 10 tahun terakhir untuk {ticker}..."):
+            is_us = "US" in market_choice
+            symbol = f"{ticker}.JK" if not is_us and not ticker.endswith(".JK") else ticker
+            ticker_only = ticker.replace(".JK", "")
+
+            try:
+                # Menarik data historis panjang
+                df = yf.download(symbol, period="10y", interval="1d", progress=False)
+                if df.empty:
+                    st.error("❌ Data saham tidak ditemukan atau usia saham belum cukup.")
+                    return
+
+                # Mengambil harga penutupan akhir bulan
+                df_monthly = df['Close'].resample('ME').last()
+                
+                # Menghitung persentase perubahan dari bulan ke bulan
+                returns = df_monthly.pct_change() * 100
+                df_ret = pd.DataFrame({'Return': returns})
+                df_ret = df_ret.dropna()
+                
+                # Memisahkan Tahun dan Bulan
+                df_ret['Year'] = df_ret.index.year
+                df_ret['Month'] = df_ret.index.month
+
+                # Membuat Pivot Table untuk Heatmap
+                pivot = df_ret.pivot(index='Year', columns='Month', values='Return')
+                
+                # Menyiapkan nama bulan untuk tampilan
+                month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                
+                # Memastikan 12 bulan ada di kolom (meskipun ada yang kosong)
+                for m in range(1, 13):
+                    if m not in pivot.columns: pivot[m] = np.nan
+                pivot = pivot[[m for m in range(1, 13)]]
+
+                # Menghitung Statistik Utama per Bulan
+                win_rate = (pivot > 0).sum() / pivot.notna().sum() * 100
+                avg_return = pivot.mean()
+
+                # --- DASHBOARD KESIMPULAN ---
+                st.subheader(f"📊 Rapor Siklus {ticker_only} (Histori 10 Tahun)")
+                
+                # Mencari bulan terbaik dan terburuk
+                best_month_idx = avg_return.idxmax()
+                worst_month_idx = avg_return.idxmin()
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Bulan Paling Menguntungkan", f"{month_names[best_month_idx-1]}", f"Avg: +{avg_return[best_month_idx]:.1f}% | Win: {win_rate[best_month_idx]:.0f}%")
+                c2.metric("Bulan Paling Berbahaya", f"{month_names[worst_month_idx-1]}", f"Avg: {avg_return[worst_month_idx]:.1f}% | Win: {win_rate[worst_month_idx]:.0f}%", delta_color="inverse")
+                
+                current_month = datetime.now().month
+                c3.metric(f"Probabilitas Bulan Ini ({month_names[current_month-1]})", f"{win_rate[current_month]:.0f}% Naik", f"Rata-rata: {avg_return[current_month]:.1f}%", delta_color="normal" if avg_return[current_month] > 0 else "inverse")
+
+                st.divider()
+
+                # --- VISUALISASI HEATMAP ---
+                st.subheader("🎛️ Peta Heatmap Keuntungan Bulanan (%)")
+                
+                # Format nilai untuk ditampilkan di dalam kotak
+                text_vals = np.round(pivot.values, 1)
+                text_vals = [[f"+{val}%" if val > 0 else f"{val}%" if not np.isnan(val) else "-" for val in row] for row in text_vals]
+
+                fig = go.Figure(data=go.Heatmap(
+                    z=pivot.values,
+                    x=month_names,
+                    y=pivot.index,
+                    text=text_vals,
+                    texttemplate="%{text}",
+                    colorscale="RdYlGn", # Red - Yellow - Green
+                    zmid=0, # Angka 0 menjadi warna tengah (kuning/netral)
+                    showscale=False
+                ))
+
+                fig.update_layout(
+                    height=500,
+                    template="plotly_dark",
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    yaxis=dict(title="Tahun", tickmode="linear"),
+                    xaxis=dict(side="top")
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Gagal memproses data musiman: {e}")
+                
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
@@ -1067,7 +1166,7 @@ try:
 except: pass
 st.sidebar.divider()
 
-menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "🧪 Mesin Backtesting", "📰 Analisis Sentimen Berita", "📅 Dividend Hunter", "📚 Pusat Edukasi"]
+menu_options = ["🔍 Super Screener", "📊 Advanced Chart", "🧪 Mesin Backtesting", "📰 Radar Sentimen Berita", "🗓️ Peta Musiman", "📅 Dividend Hunter", "📚 Pusat Edukasi"]
 if is_admin:
     menu_options.append("👑 Admin Dashboard")
     
@@ -1182,4 +1281,5 @@ elif mode == "👑 Admin Dashboard" and is_admin:
     show_admin_dashboard()
 elif mode == "📰 Analisis Sentimen Berita":
     show_news_sentiment(market_choice)
-    
+elif mode == "🗓️ Peta Musiman":
+    show_seasonality(market_choice)
