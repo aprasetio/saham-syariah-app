@@ -922,7 +922,7 @@ def show_backtesting(market_choice):
 
             except Exception as e:
                 st.error(f"Gagal melakukan simulasi: Terjadi kesalahan data ({e}).")
-# --- 14.6 FITUR BARU: RADAR SENTIMEN BERITA LOKAL (CNBC & KONTAN) ---
+# --- 14.6 FITUR BARU: RADAR SENTIMEN BERITA LOKAL  ---
 
 @st.cache_data(ttl=1800, show_spinner=False)
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -981,7 +981,7 @@ def analyze_indonesian_sentiment(text):
 
 def show_news_sentiment(market_choice):
     st.header("📰 Radar Sentimen Berita Lokal")
-    st.markdown("Mesin pemindai yang memantau berita dari portal finansial top Indonesia (CNBC & Kontan) untuk mencari katalis tersembunyi.")
+    st.markdown("Mesin pemindai yang memantau berita dari portal finansial top Indonesia untuk mencari katalis tersembunyi.")
 
     # Matikan fitur jika user sedang di Mode Wall Street
     if "US" in market_choice:
