@@ -7,3 +7,4 @@ requests
 supabase
 scikit-learn
 textblob
+feedparser
