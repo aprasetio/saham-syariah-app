@@ -925,26 +925,40 @@ def show_backtesting(market_choice):
 # --- 14.6 FITUR BARU: RADAR SENTIMEN BERITA LOKAL (CNBC & KONTAN) ---
 
 @st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_local_news(ticker):
-    # Menyedot langsung dari jantung media finansial Indonesia
-    rss_urls = [
-        "https://www.cnbcindonesia.com/market/rss",
-        "https://investasi.kontan.co.id/rss"
-    ]
+    # UPGRADE: Menggunakan Google News RSS Search khusus regional Indonesia
+    # Ini akan menyapu SELURUH media lokal secara spesifik mencari kode saham user.
+    query = f"saham+{ticker}"
+    url = f"https://news.google.com/rss/search?q={query}&hl=id&gl=ID&ceid=ID:id"
     
     news_list = []
-    for url in rss_urls:
-        try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries:
-                title = entry.title
-                link = entry.link
-                # Filter: Hanya ambil berita yang menyebutkan kode saham yang dicari user
-                if ticker.lower() in title.lower() or ticker.lower() in entry.get('summary', '').lower():
-                    publisher = "CNBC Indonesia" if "cnbc" in url else "Kontan"
-                    news_list.append({"title": title, "link": link, "publisher": publisher, "date": entry.get('published', '')})
-        except:
-            continue
+    try:
+        feed = feedparser.parse(url)
+        
+        # Ambil maksimal 10 berita paling relevan/terbaru
+        for entry in feed.entries[:10]:
+            raw_title = entry.title
+            link = entry.link
+            date = entry.get('published', '')
+            
+            # Google News RSS menggabungkan Judul dan Publisher (Contoh: "Laba BUMI Naik - CNBC Indonesia")
+            # Kita pisahkan agar tampilannya tetap rapi di aplikasi Anda
+            if " - " in raw_title:
+                clean_title, publisher = raw_title.rsplit(" - ", 1)
+            else:
+                clean_title = raw_title
+                publisher = "Media Finansial"
+                
+            news_list.append({
+                "title": clean_title, 
+                "link": link, 
+                "publisher": publisher, 
+                "date": date
+            })
+    except Exception as e:
+        pass
+        
     return news_list
 
 def analyze_indonesian_sentiment(text):
