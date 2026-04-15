@@ -735,6 +735,12 @@ def show_chart(use_idx_data, market_choice):
 
             # SETTING MARGIN 0 AGAR PENUH DI LAYAR HP
             fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=0, r=0, t=40, b=0), template="plotly_dark")
+            # --- MENGHILANGKAN CELAH HARI LIBUR ---
+            fig.update_xaxes(
+                rangebreaks=[
+                    dict(bounds=["sat", "mon"]) # Melompati hari Sabtu hingga Senin (Pagi)
+                ]
+            )
             st.plotly_chart(fig, use_container_width=True)
 
 # --- 13. FITUR ADMIN DASHBOARD ---
@@ -881,10 +887,33 @@ else:
 if is_admin:
     st.sidebar.divider()
     st.sidebar.markdown("**👑 Admin Control**")
-    if st.sidebar.button("🧹 Bersihkan Memori Cache"):
-        st.cache_data.clear()
-        api_registry.clear()
-        st.sidebar.success("✅ Memori dibersihkan!")
+    
+    # Inisialisasi memori untuk tombol konfirmasi
+    if 'confirm_clear_cache' not in st.session_state:
+        st.session_state['confirm_clear_cache'] = False
+
+    # Jika tombol belum ditekan, tampilkan tombol biasa
+    if not st.session_state['confirm_clear_cache']:
+        if st.sidebar.button("🧹 Bersihkan Memori Cache", use_container_width=True):
+            st.session_state['confirm_clear_cache'] = True
+            st.rerun() # Refresh layar untuk memunculkan konfirmasi
+    
+    # Jika tombol sudah ditekan, ubah wujudnya menjadi peringatan & konfirmasi
+    else:
+        st.sidebar.warning("⚠️ **PERHATIAN!** Anda yakin ingin menghapus memori? Aplikasi akan menarik data ulang.")
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("✅ YAKIN", use_container_width=True):
+                st.cache_data.clear()
+                api_registry.clear()
+                st.session_state['confirm_clear_cache'] = False # Kembalikan status tombol
+                st.sidebar.success("✅ Memori dibersihkan!")
+                time.sleep(1.5) # Beri jeda 1.5 detik agar Anda bisa membaca pesan sukses
+                st.rerun() # Kembalikan tampilan ke semula
+        with col2:
+            if st.button("❌ BATAL", use_container_width=True):
+                st.session_state['confirm_clear_cache'] = False # Batalkan
+                st.rerun() # Kembalikan tampilan ke semula
 
 # --- LOGOUT ---
 st.sidebar.divider()
