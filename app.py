@@ -1415,23 +1415,46 @@ def get_gold_data():
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_historical_gold_idr(period="1y"):
-    """Peracik Grafik Sintesis Emas Murni Rupiah (Tahap 2)"""
+    """Peracik Grafik Sintesis Emas Murni Rupiah (Bebas Bug Timezone)"""
     try:
-        data = yf.download(["XAUUSD=X", "IDR=X"], period=period, progress=False)
-        if isinstance(data.columns, pd.MultiIndex):
-            df_close = data['Close'].copy()
-        else:
+        gold = yf.Ticker("XAUUSD=X").history(period=period)
+        if gold.empty:
+            gold = yf.Ticker("GC=F").history(period=period)
+            
+        idr = yf.Ticker("IDR=X").history(period=period)
+        
+        if gold.empty or idr.empty:
             return pd.DataFrame()
             
+        # --- KUNCI PERBAIKAN: BUANG ZONA WAKTU & AMBIL TANGGALNYA SAJA ---
+        gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
+        idr.index = pd.to_datetime(idr.index).tz_localize(None).normalize()
+        
+        # Hapus data ganda jika ada (Mencegah Error Join)
+        gold = gold[~gold.index.duplicated(keep='last')]
+        idr = idr[~idr.index.duplicated(keep='last')]
+        
+        # Ambil kolom Close saja dan ubah nama agar tidak bentrok
+        gold_close = gold[['Close']].rename(columns={'Close': 'Gold_Close'})
+        idr_close = idr[['Close']].rename(columns={'Close': 'IDR_Close'})
+        
+        # Gabungkan (Join) data berdasarkan tanggal yang persis sama
+        df_close = gold_close.join(idr_close, how='inner')
         df_close = df_close.ffill().dropna()
+        
+        if df_close.empty: 
+            return pd.DataFrame()
+            
         troy_ounce = 31.1034768
         
         # SINTESIS EMAS RUPIAH
-        df_close['Pure_IDR'] = (df_close['XAUUSD=X'] / troy_ounce) * df_close['IDR=X']
+        df_close['Pure_IDR'] = (df_close['Gold_Close'] / troy_ounce) * df_close['IDR_Close']
         df_close['RSI'] = df_close.ta.rsi(close='Pure_IDR', length=14)
         df_close['SMA_50'] = df_close.ta.sma(close='Pure_IDR', length=50)
+        
         return df_close
     except Exception as e:
+        print(f"Error Chart Emas: {e}")
         return pd.DataFrame()
 
 def show_gold_predictor():
@@ -1666,4 +1689,3 @@ elif mode == "📚 Pusat Edukasi":
 
 elif mode == "👑 Admin Dashboard" and is_admin:
     show_admin_dashboard()
- 
