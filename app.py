@@ -45,6 +45,84 @@ def init_supabase() -> Client:
 # Inisialisasi global yang akan di-cache selama aplikasi berjalan
 supabase = init_supabase()
 
+# =====================================================================
+# MESIN DATABASE PINTAR (LAZY LOADING)
+# =====================================================================
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_lazy_historical_data(symbol, period="10y"):
+    """
+    Mengambil data dari Supabase (Cepat). Jika kosong/kurang, 
+    tarik dari yfinance dan otomatis simpan ke Supabase.
+    """
+    symbol_clean = symbol.replace(".JK", "")
+
+    try:
+        # 1. CEK DATABASE SUPABASE DULU
+        res = supabase.table('historical_prices').select('*').eq('symbol', symbol_clean).order('date', desc=False).execute()
+        
+        if res.data:
+            db_df = pd.DataFrame(res.data)
+            db_df['date'] = pd.to_datetime(db_df['date'])
+            db_df.set_index('date', inplace=True)
+            db_df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+            
+            latest_db_date = db_df.index.max()
+            today = pd.Timestamp.today().normalize()
+
+            # Jika data cukup update (telat maks 2 hari), langsung gunakan!
+            if latest_db_date >= today - pd.Timedelta(days=2):
+                return db_df
+        else:
+            db_df = pd.DataFrame()
+            latest_db_date = None
+
+        # 2. JIKA KOSONG / KURANG, TARIK DARI YFINANCE
+        if latest_db_date is None:
+            yf_df = yf.download(symbol, period=period, auto_adjust=True, progress=False)
+        else:
+            start_date = (latest_db_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            yf_df = yf.download(symbol, start=start_date, auto_adjust=True, progress=False)
+
+        if yf_df.empty:
+            return db_df if not db_df.empty else pd.DataFrame()
+
+        if isinstance(yf_df.columns, pd.MultiIndex):
+            yf_df.columns = yf_df.columns.get_level_values(0)
+        yf_df.index = pd.to_datetime(yf_df.index)
+
+        # 3. SUNTIKKAN KE SUPABASE SECARA DIAM-DIAM (LAZY LOAD)
+        records = []
+        for date, row in yf_df.iterrows():
+            if pd.isna(row['Close']): continue
+            records.append({
+                "symbol": symbol_clean,
+                "date": date.strftime('%Y-%m-%d'),
+                "open": float(row['Open']),
+                "high": float(row['High']),
+                "low": float(row['Low']),
+                "close": float(row['Close']),
+                "volume": int(row['Volume']) if pd.notna(row['Volume']) else 0
+            })
+
+        if records:
+            # Dipecah 500 baris agar API Supabase tidak error
+            for i in range(0, len(records), 500):
+                supabase.table('historical_prices').upsert(records[i:i+500]).execute()
+
+        # 4. GABUNGKAN DATA
+        if not db_df.empty:
+            combined_df = pd.concat([db_df, yf_df])
+            combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
+            return combined_df
+        else:
+            return yf_df
+
+    except Exception as e:
+        # FALLBACK: Jika Supabase mati, langsung bypass ke yfinance agar aplikasi tidak crash
+        print(f"Bypass yfinance karena error DB: {e}")
+        return yf.download(symbol, period=period, auto_adjust=True, progress=False)
+# =====================================================================
+
 # --- 3. BUKU TAMU GLOBAL ---
 @st.cache_resource
 def get_api_registry():
