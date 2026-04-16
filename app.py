@@ -1381,7 +1381,9 @@ def show_seasonality(market_choice):
                 st.plotly_chart(fig_bar, use_container_width=True)
 
             except Exception as e:
-                st.error(f"Terjadi kendala # --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
+                st.error(f"Terjadi kendala teknis: {e}")
+               
+# --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_gold_data():
