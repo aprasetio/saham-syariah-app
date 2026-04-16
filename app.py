@@ -1385,7 +1385,7 @@ def show_seasonality(market_choice):
                
 # --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
 
-    @st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_gold_data():
     """Penarik data instan untuk Morning Predictor (Lebih Stabil via yf.Ticker)"""
     try:
@@ -1666,3 +1666,4 @@ elif mode == "📚 Pusat Edukasi":
 
 elif mode == "👑 Admin Dashboard" and is_admin:
     show_admin_dashboard()
+ 
