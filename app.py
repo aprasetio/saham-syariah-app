@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 import feedparser
 import re
-import requests # Pastikan ini ada di bagian paling atas file app.py Anda
 
 # --- IMPORT MACHINE LEARNING ---
 from sklearn.neighbors import KNeighborsClassifier
@@ -1386,32 +1385,23 @@ def show_seasonality(market_choice):
                
 
 
-# --- FUNGSI BANTUAN PENYAMARAN (USER-AGENT) ---
-def get_yf_session():
-    """Membuat koneksi yang menyamar sebagai Browser Manusia Asli"""
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
-    })
-    return session
-
 # --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
+
+# HAPUS fungsi get_yf_session() jika masih ada di atas
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_gold_data():
-    """Penarik data instan untuk Morning Predictor (Anti-Blokir)"""
+    """Penarik data instan untuk Morning Predictor (Native YFinance Bypass)"""
     try:
-        session = get_yf_session()
-        gold = yf.Ticker("XAUUSD=X", session=session).history(period="10d")
+        # Kita hapus parameter session=session, biarkan yfinance mengurusnya
+        gold = yf.Ticker("XAUUSD=X").history(period="10d")
         
         if gold.empty:
-            gold = yf.Ticker("GC=F", session=session).history(period="10d")
+            gold = yf.Ticker("GC=F").history(period="10d")
             if gold.empty:
-                return None, None, None, None, "Data kosong. Masih terblokir Rate Limit."
+                return None, None, None, None, "Data kosong. Rate Limit dari Yahoo."
 
-        idr = yf.Ticker("IDR=X", session=session).history(period="10d")
+        idr = yf.Ticker("IDR=X").history(period="10d")
         if idr.empty:
             return None, None, None, None, "Data IDR kosong."
 
@@ -1427,19 +1417,18 @@ def get_gold_data():
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_historical_gold_idr(period="1y"):
-    """Peracik Grafik Sintesis Emas Murni Rupiah (Anti-Blokir & Anti-Timezone Bug)"""
+    """Peracik Grafik Sintesis Emas Murni Rupiah"""
     try:
-        session = get_yf_session()
-        gold = yf.Ticker("XAUUSD=X", session=session).history(period=period)
+        gold = yf.Ticker("XAUUSD=X").history(period=period)
         if gold.empty:
-            gold = yf.Ticker("GC=F", session=session).history(period=period)
+            gold = yf.Ticker("GC=F").history(period=period)
             
-        idr = yf.Ticker("IDR=X", session=session).history(period=period)
+        idr = yf.Ticker("IDR=X").history(period=period)
         
         if gold.empty or idr.empty:
             return pd.DataFrame()
             
-        # Normalisasi Zona Waktu
+        # Normalisasi Zona Waktu (Sangat Krusial)
         gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
         idr.index = pd.to_datetime(idr.index).tz_localize(None).normalize()
         
@@ -1465,6 +1454,7 @@ def get_historical_gold_idr(period="1y"):
     except Exception as e:
         print(f"Error Chart Emas: {e}")
         return pd.DataFrame()
+            
             
         # --- KUNCI PERBAIKAN: BUANG ZONA WAKTU & AMBIL TANGGALNYA SAJA ---
         gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
