@@ -459,6 +459,7 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
             * 🔥 **Top Momentum** : Tren kenaikan terkuat 6 bulan terakhir.
             * 💰 **Undervalued** : Fundamental super murah.
             * 🚀 **Breakout DC** : Menembus harga tertinggi Donchian Channel.
+            * 🔥 **KEY REVERSAL** : Pantulan kuat dari dasar jurang (Oversold).
             
             **🔖 Katalis Teknikal:**
             * 🔥 **MA** : Uptrend jangka panjang.
@@ -469,10 +470,16 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
 
     is_us_market = "US" in market_choice
 
-    if st.button("MULAI SCANNING"):
+    # Inisialisasi memori untuk Jembatan Pintar (Smart Bridge)
+    if 'screener_results' not in st.session_state:
+        st.session_state['screener_results'] = []
+
+    if st.button("MULAI SCANNING", type="primary"):
+        st.session_state['screener_results'] = [] # Reset hasil sebelumnya
+        
         # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 / Wall Street)
         if (category_name == "Lapis 1 (JII30)" and use_idx_data) or is_us_market:
-            with st.spinner(f"Memindai database {active_category_name}..."):
+            with st.spinner(f"Memindai database {category_name}..."):
                 try:
                     table_name = 'us_daily_data' if is_us_market else 'jii30_daily_data'
                     res = supabase.table(table_name).select('*').execute()
@@ -521,6 +528,9 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
                                     col_config["Modal Asing"] = st.column_config.NumberColumn(format="Rp %d")
 
                                 st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
+                            
+                            # Simpan kode saham yang lolos untuk Smart Bridge
+                            st.session_state['screener_results'] = df_res['Kode'].tolist()
                 except Exception as e:
                     st.error(f"Gagal memuat database: {e}")
 
@@ -548,13 +558,40 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
                     wyckoff_phase, divergence = advanced_analysis(df)
                     total_score = s_tech + s_fund + s_bandar + s_candle
 
+                    # --- [FITUR BARU] LOGIKA KEY REVERSAL & LIKUIDITAS ---
+                    try:
+                        # Hitung Stochastic
+                        stoch = df.ta.stoch(high=df['High'], low=df['Low'], close=df['Close'], k=14, d=3)
+                        if stoch is not None: df = pd.concat([df, stoch], axis=1)
+                        
+                        stoch_k = df.iloc[-1].get('STOCHk_14_3_3', 50)
+                        sma5_vol = df['Volume'].rolling(window=5).mean().iloc[-1]
+                        sma5_val = (df['Close'] * df['Volume']).rolling(window=5).mean().iloc[-1]
+                        
+                        prev = df.iloc[-2]
+                        curr = df.iloc[-1]
+                        
+                        syarat_likuiditas = (sma5_val > 1000000000) and (sma5_vol > 1000000)
+                        
+                        if (stoch_k < 20) and \
+                           (prev['Close'] < prev['Open']) and \
+                           (curr['Close'] > curr['Open']) and \
+                           (curr['Low'] < prev['Low']) and \
+                           (curr['Close'] > prev['High']) and \
+                           syarat_likuiditas:
+                            total_score += 2.0
+                            reasons.append("🔥 KEY REVERSAL")
+                    except Exception as e:
+                        pass
+                    # --- END LOGIKA BARU ---
+
                     atr, close = last.get('ATR', 0), last['Close']
                     stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
                     target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
 
-                    # PENGETATAN LOGIKA BUY (Skor min. 3.0 meski Accumulation)
+                    # PENGETATAN LOGIKA BUY 
                     rec = "WAIT"
-                    if total_score >= 6 or "BULLISH DIV" in divergence or "🔥 MA" in reasons: rec = "💎 STRONG BUY"
+                    if total_score >= 6 or "BULLISH DIV" in divergence or "🔥 MA" in reasons or "🔥 KEY REVERSAL" in reasons: rec = "💎 STRONG BUY"
                     elif total_score >= 4 or (total_score >= 3.0 and "Accumulation" in wyckoff_phase): rec = "✅ BUY"
                     if total_score < 3.0 and "Accumulation" not in wyckoff_phase: continue
 
@@ -570,7 +607,28 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
                 df_res = pd.DataFrame(results)
                 st.success(f"Selesai! {len(results)} Saham Ditemukan.")
                 st.dataframe(df_res, use_container_width=True, hide_index=True)
-            else: st.warning("Tidak ada saham yang lolos kriteria teknikal hari ini.")
+                
+                # Simpan kode saham yang lolos untuk Smart Bridge
+                st.session_state['screener_results'] = df_res['Kode'].tolist()
+            else: 
+                st.warning("Tidak ada saham yang lolos kriteria teknikal hari ini.")
+
+    # --- FITUR BARU: JEMBATAN PINTAR (SMART BRIDGE) ---
+    # Membaca dari memori agar form tidak menghilang saat ditekan
+    if st.session_state.get('screener_results'):
+        st.divider()
+        st.subheader("🎯 Tindak Lanjut: Analisis Mendalam")
+        st.markdown("Pilih saham yang lolos hari ini untuk langsung melihat grafiknya di Advanced Chart tanpa perlu mengetik ulang.")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            saham_pilihan = st.selectbox("Saham Pilihan Anda:", st.session_state['screener_results'], key="sb_select")
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("📊 Buka Chart 🚀", use_container_width=True):
+                st.session_state['target_saham'] = st.session_state['sb_select']
+                st.session_state['active_menu'] = "📊 Advanced Chart"
+                st.rerun()
 # --- 12. FITUR CHART DETAIL & LIVE AI PREDICTOR ---
 def show_chart(use_idx_data, market_choice):
     st.header("📊 Deep Analysis, Quant & AI Predictor")
