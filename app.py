@@ -19,13 +19,30 @@ from sklearn.preprocessing import StandardScaler
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Ultimate Smart Money Analyst", layout="wide", page_icon="🏦")
 
-# --- 2. INISIALISASI SUPABASE ---
+# --- 2. INISIALISASI SUPABASE (VERSI REVISI) ---
 @st.cache_resource
 def init_supabase() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+    """
+    Inisialisasi koneksi Supabase yang lebih fleksibel.
+    Mendukung Streamlit Secrets (Cloud) dan Environment Variables (Local/GitHub).
+    """
+    try:
+        # Mengambil URL dan Key dengan fallback ke Environment Variables
+        # Ini penting agar kode yang sama bisa jalan di GitHub Actions
+        url = st.secrets.get("supabase", {}).get("url") or os.getenv("SUPABASE_URL")
+        key = st.secrets.get("supabase", {}).get("key") or os.getenv("SUPABASE_KEY")
+        
+        if not url or not key:
+            st.error("⚠️ Konfigurasi Supabase tidak ditemukan. Pastikan 'supabase' url dan key sudah diatur di Secrets.")
+            st.info("Buka Settings -> Secrets di Streamlit Cloud untuk menambahkan konfigurasi.")
+            st.stop()
+            
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"🔥 Gagal menghubungkan ke database: {e}")
+        st.stop()
 
+# Inisialisasi global yang akan di-cache selama aplikasi berjalan
 supabase = init_supabase()
 
 # --- 3. BUKU TAMU GLOBAL ---
@@ -1204,123 +1221,110 @@ def show_news_sentiment(market_choice):
 # --- 14.7 FITUR BARU: PETA PROBABILITAS MUSIMAN (SEASONALITY HEATMAP) ---
 def show_seasonality(market_choice):
     st.header("🗓️ Peta Probabilitas Musiman (Seasonality)")
+    
     # --- PROTEKSI VIP ---
     if user_role == 'free':
         st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
         st.info("""
         **Apa itu Seasonality (Musiman)?**
-        Bursa saham memiliki siklus berulang. Ada bulan di mana saham tertentu hampir selalu naik (seperti *Window Dressing*), dan bulan di mana ia hampir selalu turun.
-        
-        **Apa yang didapatkan member VIP?**
-        * Heatmap warna-warni performa bulanan selama 10 tahun terakhir.
-        * Win-Rate (%) per bulan: Seberapa sering saham ini "hijau" di bulan tertentu?
-        * Statistik bulan terbaik vs bulan paling berbahaya untuk setiap emiten.
+        Bursa saham memiliki siklus berulang. Saham cenderung memiliki pola performa yang sama di bulan-bulan tertentu (seperti *Window Dressing* di Desember).
         """)
         st.button("Upgrade ke VIP Sekarang 🚀", key="season_upgrade")
         return
     # --- END PROTEKSI ---
-    st.markdown("Mendeteksi pola siklus bulanan saham dalam 10 tahun terakhir (Misal: Fenomena *Window Dressing* atau *Sell in May*).")
+
+    st.markdown("Mendeteksi pola siklus bulanan saham dalam 10 tahun terakhir dengan cerdas via Database & Cloud.")
 
     with st.form(key='season_form'):
         col1, col2 = st.columns([3, 1])
         with col1:
-            ticker = st.text_input("🔍 Kode Saham (Contoh: BBCA / BUMI):", "").upper()
+            ticker = st.text_input("🔍 Kode Saham (Contoh: BBCA / BUMI):", st.session_state.get('target_saham', '')).upper()
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_season = st.form_submit_button("Analisis Siklus 🔍", use_container_width=True)
 
     if submit_season and ticker:
-        with st.spinner(f"Menarik data 10 tahun terakhir untuk {ticker}..."):
+        with st.spinner(f"Sinkronisasi data 10 tahun untuk {ticker}..."):
             is_us = "US" in market_choice
             symbol = f"{ticker}.JK" if not is_us and not ticker.endswith(".JK") else ticker
             ticker_only = ticker.replace(".JK", "")
 
             try:
-                # PERBAIKAN 1: Tambahkan auto_adjust=True untuk menstabilkan data Yfinance
-                df = yf.download(symbol, period="10y", interval="1d", auto_adjust=True, progress=False)
+                # --- INTEGRASI LAZY LOADING (OPTIMASI DATABASE) ---
+                # Menggunakan fungsi yang kita buat sebelumnya
+                df = get_lazy_historical_data(symbol, period="10y")
                 
                 if df.empty:
-                    st.error(f"❌ Data saham {ticker_only} tidak ditemukan. Pastikan kodenya benar.")
+                    st.error(f"❌ Data saham {ticker_only} tidak ditemukan.")
                     return
                 
-                # PERBAIKAN 2: Rata-ratakan kolom jika berbentuk MultiIndex (Mencegah Error di BUMI)
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
-
-                # Ekstrak menjadi Series tunggal agar tidak terjadi Error Scalar
+                # Standarisasi Kolom (Hanya ambil Close)
                 close_data = df['Close'].squeeze()
                 
-                if close_data.empty or len(close_data) < 30:
-                    st.warning("⚠️ Usia saham di bursa belum mencukupi (Terlalu baru).")
+                if len(close_data) < 60:
+                    st.warning("⚠️ Data histori terlalu pendek untuk analisis musiman (Minimal 5 tahun idealnya).")
                     return
 
-                # Mengambil harga penutupan akhir bulan (Anti-Error untuk Pandas Lama & Baru)
+                # --- PENGOLAHAN DATA BULANAN ---
+                # Mencoba frekuensi ME (Month End) terbaru atau fallback ke M
                 try:
                     df_monthly = close_data.resample('ME').last()
                 except:
                     df_monthly = close_data.resample('M').last()
                 
-                # Menghitung persentase perubahan dari bulan ke bulan
                 returns = df_monthly.pct_change() * 100
-                
-                # PERBAIKAN 3: Gunakan .to_frame() untuk mematikan Error "Scalar Values" mutlak
                 df_ret = returns.to_frame(name='Return').dropna()
-                
-                # Memisahkan Tahun dan Bulan
                 df_ret['Year'] = df_ret.index.year
                 df_ret['Month'] = df_ret.index.month
 
-                # Membuat Pivot Table untuk Heatmap
+                # Pivot Table
                 pivot = df_ret.pivot(index='Year', columns='Month', values='Return')
-                
-                # Menyiapkan nama bulan untuk tampilan
                 month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
                 
-                # Memastikan 12 bulan ada di kolom (meskipun ada yang kosong)
+                # Pastikan 12 kolom tersedia
                 for m in range(1, 13):
                     if m not in pivot.columns: pivot[m] = np.nan
                 pivot = pivot[[m for m in range(1, 13)]]
 
-                # Menghitung Statistik Utama per Bulan
+                # Statistik
                 win_rate = (pivot > 0).sum() / pivot.notna().sum() * 100
                 avg_return = pivot.mean()
-                
-                # Bersihkan NaN (kosong) jika ada bulan yang belum terjadi
                 win_rate = win_rate.fillna(0)
                 avg_return = avg_return.fillna(0)
 
-                # --- DASHBOARD KESIMPULAN ---
-                st.subheader(f"📊 Rapor Siklus {ticker_only} (Histori s.d 10 Tahun)")
+                # --- TAMPILAN DASHBOARD ---
+                st.subheader(f"📊 Rapor Musiman {ticker_only}")
                 
-                # Mencari bulan terbaik dan terburuk
-                best_month_idx = avg_return.idxmax()
-                worst_month_idx = avg_return.idxmin()
+                best_idx = avg_return.idxmax()
+                worst_idx = avg_return.idxmin()
+                curr_month = datetime.now().month
                 
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Bulan Paling Menguntungkan", f"{month_names[best_month_idx-1]}", f"Avg: +{avg_return[best_month_idx]:.1f}% | Win: {win_rate[best_month_idx]:.0f}%")
-                c2.metric("Bulan Paling Berbahaya", f"{month_names[worst_month_idx-1]}", f"Avg: {avg_return[worst_month_idx]:.1f}% | Win: {win_rate[worst_month_idx]:.0f}%", delta_color="inverse")
+                c1.metric("Bulan Terbaik", month_names[best_idx-1], f"Avg: +{avg_return[best_idx]:.1f}%")
+                c2.metric("Bulan Terburuk", month_names[worst_idx-1], f"Avg: {avg_return[worst_idx]:.1f}%", delta_color="inverse")
                 
-                current_month = datetime.now().month
-                c3.metric(f"Probabilitas Bulan Ini ({month_names[current_month-1]})", f"{win_rate[current_month]:.0f}% Naik", f"Rata-rata: {avg_return[current_month]:.1f}%", delta_color="normal" if avg_return[current_month] > 0 else "inverse")
+                # Probabilitas Bulan Ini
+                this_month_win = win_rate.get(curr_month, 0)
+                this_month_avg = avg_return.get(curr_month, 0)
+                c3.metric(f"Probabilitas {month_names[curr_month-1]}", f"{this_month_win:.0f}% Hijau", f"Avg: {this_month_avg:.1f}%")
 
                 st.divider()
 
-                # --- VISUALISASI HEATMAP ---
-                st.subheader("🎛️ Peta Heatmap Keuntungan Bulanan (%)")
-                
-                # Format nilai untuk ditampilkan di dalam kotak
-                text_vals = np.round(pivot.values, 1)
-                text_vals = [[f"+{val}%" if val > 0 else f"{val}%" if not np.isnan(val) else "-" for val in row] for row in text_vals]
+                # --- HEATMAP VISUALIZATION ---
+                # Membulatkan nilai untuk teks di dalam box
+                text_vals = pivot.copy().values
+                formatted_text = [[f"{val:.1f}%" if pd.notna(val) else "-" for val in row] for row in text_vals]
 
                 fig = go.Figure(data=go.Heatmap(
                     z=pivot.values,
                     x=month_names,
                     y=pivot.index,
-                    text=text_vals,
+                    text=formatted_text,
                     texttemplate="%{text}",
-                    colorscale="RdYlGn", # Red - Yellow - Green
-                    zmid=0, # Angka 0 menjadi warna tengah (kuning/netral)
-                    showscale=False
+                    colorscale="RdYlGn",
+                    zmid=0,
+                    showscale=True,
+                    colorbar=dict(title="Return %")
                 ))
 
                 fig.update_layout(
@@ -1332,9 +1336,19 @@ def show_seasonality(market_choice):
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
+                
+                # Tambahan: Grafik Bar Rata-rata Win Rate per Bulan
+                st.subheader("📈 Probabilitas Kenaikan per Bulan (%)")
+                fig_bar = go.Figure(go.Bar(
+                    x=month_names,
+                    y=win_rate.values,
+                    marker_color=['green' if w > 50 else 'red' for w in win_rate.values]
+                ))
+                fig_bar.update_layout(height=300, template="plotly_dark", yaxis_title="Win Rate %", margin=dict(l=0, r=0, t=10, b=0))
+                st.plotly_chart(fig_bar, use_container_width=True)
 
             except Exception as e:
-                st.error(f"Gagal memproses data musiman: {e}")
+                st.error(f"Terjadi kendala teknis: {e}")
                 
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
