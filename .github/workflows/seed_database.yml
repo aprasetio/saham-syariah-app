@@ -1,0 +1,31 @@
+name: 🗄️ Injeksi Database (10 Tahun)
+
+# Hanya bisa dijalankan secara MANUAL (dengan tombol)
+on:
+  workflow_dispatch:
+
+jobs:
+  seed_db:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install yfinance pandas supabase
+
+    - name: Jalankan Script Seeder
+      env:
+        # Mengambil rahasia dari GitHub Secrets Anda
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: |
+        python seed_history.py
