@@ -658,12 +658,24 @@ def show_chart(use_idx_data, market_choice):
 
     with st.form(key='chart_search_form'):
         c_input, c_btn = st.columns([4, 1])
-        with c_input: ticker = st.text_input("🔍 Masukkan Kode Saham (Contoh: BBCA / AAPL):", "").upper()
+        with c_input: 
+            # --- JEMBATAN PINTAR (SMART BRIDGE) ---
+            # Menangkap saham dari memori lemparan Screener
+            default_ticker = st.session_state.get('target_saham', '')
+            ticker = st.text_input("🔍 Masukkan Kode Saham (Contoh: BBCA / AAPL):", default_ticker).upper()
         with c_btn:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_search = st.form_submit_button("Cari Saham 🔍")
 
-    if submit_search and ticker:
+    # --- AUTO-RUN LOGIC ---
+    # Jika user melompat dari Screener, grafiknya akan langsung terbuka tanpa perlu klik tombol cari lagi.
+    is_bridged_from_screener = ticker != "" and st.session_state.get('target_saham') == ticker
+
+    if (submit_search or is_bridged_from_screener) and ticker:
+        
+        # Simpan kembali ke memori agar jika user refresh, chart tidak hilang
+        st.session_state['target_saham'] = ticker
+        
         # Tambahkan .JK HANYA jika pasar Indonesia
         symbol = f"{ticker}.JK" if "Indonesia" in market_choice and not ticker.endswith(".JK") else ticker
         ticker_only = ticker.replace(".JK", "")
@@ -953,7 +965,7 @@ def show_backtesting(market_choice):
     with st.form(key='backtest_form'):
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1: 
-            ticker = st.text_input("🔍 Kode Saham:", "BBCA").upper()
+            ticker = st.text_input("🔍 Kode Saham:", "PGEO").upper()
         with col2: 
             modal_awal = st.number_input("💰 Modal Awal (Rp/USD):", min_value=1000, value=10000000, step=1000000)
         with col3:
@@ -1120,7 +1132,7 @@ def show_news_sentiment(market_choice):
     with st.form(key='news_form'):
         col1, col2 = st.columns([3, 1])
         with col1:
-            ticker = st.text_input("🔍 Kode Saham (Contoh: WIKA / BBCA / GOTO):", "").upper()
+            ticker = st.text_input("🔍 Kode Saham (Contoh: SIDO / PGEO / ADRO):", "").upper()
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_news = st.form_submit_button("Radar Berita 🔍", use_container_width=True)
@@ -1330,6 +1342,12 @@ try:
 except: pass
 st.sidebar.divider()
 
+# --- INISIALISASI MEMORI SMART BRIDGE ---
+if 'active_menu' not in st.session_state:
+    st.session_state['active_menu'] = "🔍 Super Screener"
+if 'target_saham' not in st.session_state:
+    st.session_state['target_saham'] = "BBCA"
+
 # DAFTAR MENU (Pastikan teks & emoji ini sama persis dengan bagian Routing di bawah)
 menu_options = [
     "🔍 Super Screener", 
@@ -1344,7 +1362,8 @@ menu_options = [
 if is_admin:
     menu_options.append("👑 Admin Dashboard")
     
-mode = st.sidebar.radio("Pilih Menu:", menu_options)
+# ⚠️ PERUBAHAN KRUSIAL: Menambahkan key="active_menu" agar terhubung ke sistem
+mode = st.sidebar.radio("Pilih Menu:", menu_options, key="active_menu")
 st.sidebar.divider()
 
 # --- SAKELAR BENUA & LOGIKA SIDEBAR ---
