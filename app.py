@@ -1385,23 +1385,29 @@ def show_seasonality(market_choice):
                
 # --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
 
-@st.cache_data(ttl=1800, show_spinner=False)
+    @st.cache_data(ttl=1800, show_spinner=False)
 def get_gold_data():
-    """Penarik data instan untuk Morning Predictor (10 Hari)"""
+    """Penarik data instan untuk Morning Predictor (Lebih Stabil via yf.Ticker)"""
     try:
-        gold = yf.download("XAUUSD=X", period="10d", progress=False)
-        idr = yf.download("IDR=X", period="10d", progress=False)
+        # Menggunakan yf.Ticker() lebih stabil daripada yf.download() untuk aset tunggal
+        gold = yf.Ticker("XAUUSD=X").history(period="10d")
+        idr = yf.Ticker("IDR=X").history(period="10d")
         
-        if gold.empty or idr.empty: return None, None, None, None, "Data kosong dari yfinance."
+        # JIKA XAUUSD GAGAL, OTOMATIS PINDAH KE PLAN B (GC=F / Gold Futures)
+        if gold.empty:
+            gold = yf.Ticker("GC=F").history(period="10d")
+            if gold.empty:
+                return None, None, None, None, "Data XAUUSD dan GC=F keduanya kosong dari server."
 
-        if isinstance(gold.columns, pd.MultiIndex): gold.columns = gold.columns.get_level_values(0)
-        if isinstance(idr.columns, pd.MultiIndex): idr.columns = idr.columns.get_level_values(0)
-        
+        if idr.empty:
+            return None, None, None, None, "Data Kurs IDR=X kosong dari server."
+
+        # Ekstrak kolom harga penutupan (Close)
         gold_close_series = gold['Close'].dropna()
         idr_close_series = idr['Close'].dropna()
         
         if len(gold_close_series) < 2 or len(idr_close_series) < 2:
-            return None, None, None, None, "Data hari kerja tidak cukup."
+            return None, None, None, None, f"Data hari tidak cukup. Emas: {len(gold_close_series)}, IDR: {len(idr_close_series)}"
         
         return float(gold_close_series.iloc[-1]), float(gold_close_series.iloc[-2]), float(idr_close_series.iloc[-1]), float(idr_close_series.iloc[-2]), None
     except Exception as e:
