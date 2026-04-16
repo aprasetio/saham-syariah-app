@@ -1349,7 +1349,81 @@ def show_seasonality(market_choice):
 
             except Exception as e:
                 st.error(f"Terjadi kendala teknis: {e}")
-                
+# --- 14.8 FITUR BARU: PREDIKTOR EMAS ANTAM (SAFE HAVEN) ---
+@st.cache_data(ttl=1800, show_spinner=False) # Cache 30 menit agar super cepat
+def get_gold_data():
+    try:
+        # Tarik data Emas Global (XAU/USD) dan Kurs (USD/IDR) 5 hari terakhir
+        gold = yf.download("GC=F", period="5d", progress=False)
+        idr = yf.download("IDR=X", period="5d", progress=False)
+        
+        # Bersihkan MultiIndex jika ada (anti-error Yfinance baru)
+        if isinstance(gold.columns, pd.MultiIndex): gold.columns = gold.columns.get_level_values(0)
+        if isinstance(idr.columns, pd.MultiIndex): idr.columns = idr.columns.get_level_values(0)
+        
+        gold_close = gold['Close'].dropna().iloc[-1]
+        gold_prev = gold['Close'].dropna().iloc[-2]
+        
+        idr_close = idr['Close'].dropna().iloc[-1]
+        idr_prev = idr['Close'].dropna().iloc[-2]
+        
+        return float(gold_close), float(gold_prev), float(idr_close), float(idr_prev)
+    except Exception as e:
+        return None, None, None, None
+
+def show_gold_predictor():
+    st.header("🥇 Prediktor Harga Emas Antam (Morning Radar)")
+    st.markdown("Memprediksi pergerakan harga Emas Antam hari ini sebelum dirilis secara resmi, berdasarkan algoritma arbitrasi penutupan bursa komoditas New York semalam.")
+    
+    with st.spinner("Menarik data XAU/USD dan kurs Bank Indonesia secara real-time..."):
+        gold_close, gold_prev, idr_close, idr_prev = get_gold_data()
+        
+    if not gold_close:
+        st.error("❌ Gagal menarik data global saat ini. Server Yahoo Finance mungkin sedang sibuk. Coba lagi nanti.")
+        return
+        
+    # --- KALKULASI MATEMATIS QUANT ---
+    troy_ounce = 31.1034768 # Konstanta emas dunia
+    
+    # 1. Harga Murni Global per Gram (Tanpa Biaya Cetak)
+    pure_gold_now = (gold_close / troy_ounce) * idr_close
+    pure_gold_prev = (gold_prev / troy_ounce) * idr_prev
+    
+    # 2. Asumsi Premium Antam (Margin, Biaya Cetak, Asuransi, PPh 22) -> Rata-rata 13% untuk kepingan 1 Gram
+    premium_margin = 0.13 
+    
+    antam_now = pure_gold_now * (1 + premium_margin)
+    antam_prev = pure_gold_prev * (1 + premium_margin)
+    
+    selisih = antam_now - antam_prev
+    arah = "NAIK 📈" if selisih > 0 else "TURUN 📉"
+    warna = "normal" if selisih > 0 else "inverse" # Emas naik itu hijau, turun itu merah
+    
+    # --- DASHBOARD KESIMPULAN ---
+    st.info(f"💡 **Sinyal Pagi Ini:** Berdasarkan pergerakan semalam, harga Emas Antam 1 Gram diprediksi akan **{arah}** sekitar **Rp {abs(int(selisih)):,}**.")
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Emas Global (XAU/USD)", f"${gold_close:,.2f} /oz", f"${gold_close - gold_prev:,.2f} /oz")
+    # Kurs terbalik warnanya: USD naik = Rupiah melemah (Merah), USD turun = Rupiah menguat (Hijau)
+    c2.metric("Kurs Rupiah (USD/IDR)", f"Rp {idr_close:,.0f}", f"Rp {idr_close - idr_prev:,.0f}", delta_color="inverse")
+    c3.metric("Prediksi Antam (1 Gram)", f"Rp {int(antam_now):,}", f"Rp {int(selisih):,}", delta_color=warna)
+    
+    st.divider()
+    
+    # --- FITUR INTERAKTIF SIMULASI ---
+    st.subheader("⚙️ Kalkulator Arbitrasi Fisik")
+    st.markdown("Harga fisik bervariasi tergantung kepingan. Keping 100 Gram memiliki biaya cetak (premium) yang jauh lebih murah dibanding 1 Gram.")
+    
+    c_calc1, c_calc2 = st.columns(2)
+    with c_calc1:
+        custom_premium = st.slider("Sesuaikan Margin/Premium Fisik (%)", min_value=3.0, max_value=20.0, value=13.0, step=0.5, help="Pilih 3-5% untuk kepingan besar (100g), atau 12-15% untuk kepingan kecil (1g).")
+    
+    with c_calc2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        custom_antam = pure_gold_now * (1 + (custom_premium/100))
+        st.success(f"Estimasi Harga: **Rp {int(custom_antam):,}/gram**")
+        st.caption(f"*Harga Murni (Tanpa Cetak): Rp {int(pure_gold_now):,}/gram*")
+
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
@@ -1370,7 +1444,8 @@ if 'target_saham' not in st.session_state:
 # DAFTAR MENU (Pastikan teks & emoji ini sama persis dengan bagian Routing di bawah)
 menu_options = [
     "🔍 Super Screener", 
-    "📊 Advanced Chart", 
+    "📊 Advanced Chart",
+    "🥇 Emas & Safe Haven",
     "🧪 Mesin Backtesting", 
     "📰 Radar Sentimen Berita", 
     "🗓️ Peta Musiman", 
@@ -1484,6 +1559,9 @@ if mode == "🔍 Super Screener":
 
 elif mode == "📊 Advanced Chart":
     show_chart(use_idx_data, market_choice)
+
+elif mode == "🥇 Emas & Safe Haven":
+    show_gold_predictor()
 
 elif mode == "🧪 Mesin Backtesting":
     show_backtesting(market_choice)
