@@ -1490,77 +1490,92 @@ def get_historical_gold_idr(period="1y"):
 def show_gold_predictor():
     st.header("🥇 Emas Antam & Makro Safe Haven")
     
-    tab1, tab2 = st.tabs(["🌅 Morning Predictor (Harian)", "📡 Radar Diskon Fisik (Sinyal Beli)"])
+    tab1, tab2 = st.tabs(["🌅 Morning Predictor (Harian)", "📡 Radar Diskon & Pola Historis"])
     
-    # === TAB 1: MORNING PREDICTOR (GRATIS) ===
+    # === TAB 1: MORNING PREDICTOR (1g, 2g, 5g) ===
     with tab1:
-        st.subheader("Prediksi Harga Antam Hari Ini")
-        st.markdown("Memprediksi arah harga Emas Antam sebelum rilis resmi dengan algoritma arbitrasi penutupan pasar New York.")
+        st.subheader("Prediksi Pecahan Terpopuler Hari Ini")
         
-        with st.spinner("Menarik harga penutupan XAU/USD dan kurs Bank Indonesia semalam..."):
-            gold_close, gold_prev, idr_close, idr_prev, error_msg = get_gold_data()
+        with st.spinner("Menghitung arbitrasi pecahan..."):
+            gold_now, gold_prev, idr_now, idr_prev, error_msg = get_gold_data()
             
-        if not gold_close:
-            st.error("❌ Gagal menarik data global saat ini.")
-            if error_msg: st.caption(f"*Log: {error_msg}*")
+        if not gold_now:
+            st.error("❌ Gagal menarik data.")
         else:
             troy_ounce = 31.1034768 
-            pure_gold_now = (gold_close / troy_ounce) * idr_close
-            pure_gold_prev = (gold_prev / troy_ounce) * idr_prev
-            premium_margin = 0.13 
+            pure_now = (gold_now / troy_ounce) * idr_now
+            pure_prev = (gold_prev / troy_ounce) * idr_prev
             
-            antam_now = pure_gold_now * (1 + premium_margin)
-            antam_prev = pure_gold_prev * (1 + premium_margin)
-            selisih = antam_now - antam_prev
+            # --- ESTIMASI MARGIN TIAP PECAHAN ---
+            # 1g biasanya premium ~13%, 2g ~11%, 5g ~9%
+            specs = {
+                "Pecahan 1 Gram": {"margin": 0.13, "size": 1},
+                "Pecahan 2 Gram": {"margin": 0.11, "size": 2},
+                "Pecahan 5 Gram": {"margin": 0.09, "size": 5}
+            }
             
-            arah = "NAIK 📈" if selisih > 0 else "TURUN 📉"
-            warna = "normal" if selisih > 0 else "inverse" 
+            st.info(f"💡 **Sinyal:** Emas Global & Kurs memicu potensi perubahan **Rp {int(pure_now - pure_prev):,}/gram** pada harga dasar.")
             
-            st.info(f"💡 **Sinyal Hari Ini:** Harga Emas Antam 1 Gram diprediksi **{arah}** sekitar **Rp {abs(int(selisih)):,}**.")
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Emas Global (XAU/USD)", f"${gold_close:,.2f} /oz", f"${gold_close - gold_prev:,.2f}")
-            c2.metric("Kurs Rupiah (USD/IDR)", f"Rp {idr_close:,.0f}", f"Rp {idr_close - idr_prev:,.0f}", delta_color="inverse")
-            c3.metric("Prediksi Antam (1 Gram)", f"Rp {int(antam_now):,}", f"Rp {int(selisih):,}", delta_color=warna)
+            # Tampilkan 3 Kolom untuk 3 Pecahan
+            cols = st.columns(3)
+            for i, (label, spec) in enumerate(specs.items()):
+                p_now = (pure_now * (1 + spec['margin'])) * spec['size']
+                p_prev = (pure_prev * (1 + spec['margin'])) * spec['size']
+                diff = p_now - p_prev
+                
+                with cols[i]:
+                    st.metric(label, f"Rp {int(p_now):,}", f"{int(diff):,}", delta_color="normal" if diff > 0 else "inverse")
             
             st.divider()
-            st.subheader("⚙️ Kalkulator Arbitrasi Fisik")
-            c_calc1, c_calc2 = st.columns(2)
-            with c_calc1: custom_premium = st.slider("Margin Cetak (%)", 3.0, 20.0, 13.0, 0.5, help="100g=3-5%, 1g=12-15%")
-            with c_calc2:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.success(f"Estimasi Harga Butik: **Rp {int(pure_gold_now * (1 + (custom_premium/100))):,}/gram**")
+            st.caption("ℹ️ *Estimasi di atas sudah termasuk biaya cetak rata-rata di Butik Antam. Harga resmi mungkin sedikit berbeda tergantung lokasi butik.*")
 
-    # === TAB 2: RADAR DISKON FISIK (VIP ONLY) ===
+    # === TAB 2: RADAR DISKON & DETEKSI POLA (VIP ONLY) ===
     with tab2:
-        st.subheader("📡 Radar Kuantitatif Emas Rupiah")
-        
         if user_role == 'free':
             st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
-            st.info("**Sinyal Beli Emas Fisik!**\nSistem kami otomatis mendeteksi saat harga emas fisik *Oversold* (Diskon) akibat anomali Kurs Rupiah dan memberikan notifikasi **💎 STRONG BUY FISIK**.")
-            st.button("Upgrade ke VIP Sekarang 🚀", key="gold_upgrade")
+            st.info("**Apa yang Anda dapatkan di VIP?**\n1. **Pattern Detection:** Deteksi siklus musiman harga emas.\n2. **Relative Value:** Mengetahui apakah harga emas saat ini sudah 'terlalu mahal' dibanding rata-rata 50 hari terakhir.")
+            st.button("Upgrade ke VIP Sekarang 🚀", key="gold_vip_pattern")
             return
-            
-        st.markdown("Grafik Emas Murni Rupiah. Beli emas fisik saat indikator RSI menembus area bawah (Oversold).")
-        
-        with st.spinner("Meracik grafik Emas sintesis..."):
+
+        with st.spinner("Menganalisis pola historis..."):
             df_hist = get_historical_gold_idr("1y")
             
         if not df_hist.empty:
-            rsi = df_hist.iloc[-1].get('RSI', 50)
-            if rsi < 30: st.success(f"💎 **STRONG BUY FISIK!** (RSI: {rsi:.1f}) - Emas Rupiah sedang diskon besar (Oversold). Borong Antam!")
-            elif rsi > 70: st.error(f"⚠️ **MAHAL / OVERBOUGHT** (RSI: {rsi:.1f}) - Tahan nafsu membeli. Tunggu koreksi.")
-            else: st.info(f"⚖️ **NETRAL** (RSI: {rsi:.1f}) - Harga wajar. Cocok untuk cicil nabung rutin (DCA).")
+            curr = df_hist.iloc[-1]
             
-            from plotly.subplots import make_subplots
+            # --- 1. DETEKSI PATTERN: MEAN REVERSION ---
+            # Menghitung jarak harga saat ini dari MA50
+            dist_from_ma50 = ((curr['Pure_IDR'] - curr['SMA_50']) / curr['SMA_50']) * 100
+            
+            st.subheader("📡 Detektor Pola & Momentum")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                # Pola 1: Overextended vs Fair Value
+                if dist_from_ma50 > 5:
+                    st.error(f"⚠️ **Pola: Overextended**\nHarga saat ini {dist_from_ma50:.1f}% di atas rata-rata. Secara historis, emas cenderung 'pulang' ke garis rata-rata (koreksi) setelah naik terlalu tajam.")
+                elif dist_from_ma50 < -5:
+                    st.success(f"💎 **Pola: Undervalued**\nHarga {abs(dist_from_ma50):.1f}% di bawah rata-rata. Ini adalah area 'Buy on Weakness' yang kuat secara historis.")
+                else:
+                    st.info("⚖️ **Pola: Fair Value**\nHarga bergerak wajar di sekitar garis rata-rata.")
+
+            with c2:
+                # Pola 2: RSI Momentum
+                rsi = curr['RSI']
+                if rsi > 70: st.warning("🔥 **Momentum: Jenuh Beli**\nHarga sudah naik terlalu lama tanpa istirahat.")
+                elif rsi < 30: st.success("❄️ **Momentum: Jenuh Jual**\nTekanan jual sudah mencapai titik lelah.")
+                else: st.info("🔄 **Momentum: Konsolidasi**\nHarga sedang mencari arah baru.")
+
+            # --- 2. VISUALISASI GRAFIK ---
             import plotly.graph_objects as go
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.1)
-            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Pure_IDR'], name="Harga IDR/Gram", line=dict(color='gold')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['SMA_50'], name="MA 50", line=dict(color='blue', dash='dot')), row=1, col=1)
+            from plotly.subplots import make_subplots
+            
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.05)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Pure_IDR'], name="Harga Dasar"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['SMA_50'], name="Rata-rata 50 Hari", line=dict(dash='dot')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['RSI'], name="RSI", line=dict(color='purple')), row=2, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-            fig.update_layout(height=600, template="plotly_dark", showlegend=False, margin=dict(l=0, r=0, t=20, b=0))
+            
+            fig.update_layout(height=500, template="plotly_dark", margin=dict(l=0,r=0,t=20,b=0), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
             
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
