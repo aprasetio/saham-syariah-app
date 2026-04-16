@@ -1506,12 +1506,13 @@ def show_gold_predictor():
             pure_now = (gold_now / troy_ounce) * idr_now
             pure_prev = (gold_prev / troy_ounce) * idr_prev
             
-            # --- ESTIMASI MARGIN TIAP PECAHAN ---
-            # 1g biasanya premium ~13%, 2g ~11%, 5g ~9%
+            # --- ESTIMASI MARGIN TIAP PECAHAN (TERKALIBRASI) ---
+            # Disesuaikan dengan kebijakan margin Antam terbaru saat harga global sedang tinggi:
+            # 1g (~8.3%), 2g (~7.2%), 5g (~6.6%)
             specs = {
-                "Pecahan 1 Gram": {"margin": 0.13, "size": 1},
-                "Pecahan 2 Gram": {"margin": 0.11, "size": 2},
-                "Pecahan 5 Gram": {"margin": 0.09, "size": 5}
+                "Pecahan 1 Gram": {"margin": 0.0835, "size": 1},
+                "Pecahan 2 Gram": {"margin": 0.0722, "size": 2},
+                "Pecahan 5 Gram": {"margin": 0.0665, "size": 5}
             }
             
             st.info(f"💡 **Sinyal:** Emas Global & Kurs memicu potensi perubahan **Rp {int(pure_now - pure_prev):,}/gram** pada harga dasar.")
