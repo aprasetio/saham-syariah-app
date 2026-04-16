@@ -1350,36 +1350,50 @@ def show_seasonality(market_choice):
             except Exception as e:
                 st.error(f"Terjadi kendala teknis: {e}")
 # --- 14.8 FITUR BARU: PREDIKTOR EMAS ANTAM (SAFE HAVEN) ---
-@st.cache_data(ttl=1800, show_spinner=False) # Cache 30 menit agar super cepat
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_gold_data():
     try:
-        # Tarik data Emas Global (XAU/USD) dan Kurs (USD/IDR) 5 hari terakhir
-        gold = yf.download("GC=F", period="5d", progress=False)
-        idr = yf.download("IDR=X", period="5d", progress=False)
+        # PERBAIKAN 1: Gunakan XAUUSD=X (Spot) yang lebih stabil dari Futures. 
+        # Tarik 10 hari (bukan 5) untuk menjamin selalu ada minimal 2 hari kerja meskipun kena libur panjang.
+        gold = yf.download("XAUUSD=X", period="10d", progress=False)
+        idr = yf.download("IDR=X", period="10d", progress=False)
         
-        # Bersihkan MultiIndex jika ada (anti-error Yfinance baru)
+        if gold.empty or idr.empty:
+            return None, None, None, None, "Data dari yfinance kembali kosong (Empty DataFrame)."
+
         if isinstance(gold.columns, pd.MultiIndex): gold.columns = gold.columns.get_level_values(0)
         if isinstance(idr.columns, pd.MultiIndex): idr.columns = idr.columns.get_level_values(0)
         
-        gold_close = gold['Close'].dropna().iloc[-1]
-        gold_prev = gold['Close'].dropna().iloc[-2]
+        gold_close_series = gold['Close'].dropna()
+        idr_close_series = idr['Close'].dropna()
         
-        idr_close = idr['Close'].dropna().iloc[-1]
-        idr_prev = idr['Close'].dropna().iloc[-2]
+        # PERBAIKAN 2: Pastikan minimal ada 2 baris data sebelum mengambil index terakhir
+        if len(gold_close_series) < 2 or len(idr_close_series) < 2:
+            return None, None, None, None, f"Jumlah data hari kerja kurang (Emas: {len(gold_close_series)} hari, IDR: {len(idr_close_series)} hari)."
         
-        return float(gold_close), float(gold_prev), float(idr_close), float(idr_prev)
+        gold_close = gold_close_series.iloc[-1]
+        gold_prev = gold_close_series.iloc[-2]
+        
+        idr_close = idr_close_series.iloc[-1]
+        idr_prev = idr_close_series.iloc[-2]
+        
+        return float(gold_close), float(gold_prev), float(idr_close), float(idr_prev), None
     except Exception as e:
-        return None, None, None, None
+        # Menangkap pesan error asli dari Python
+        return None, None, None, None, str(e)
 
 def show_gold_predictor():
     st.header("🥇 Prediktor Harga Emas Antam (Morning Radar)")
-    st.markdown("Memprediksi pergerakan harga Emas Antam hari ini sebelum dirilis secara resmi, berdasarkan algoritma arbitrasi penutupan bursa komoditas New York semalam.")
+    st.markdown("Memprediksi pergerakan harga Emas Antam hari ini sebelum dirilis secara resmi, berdasarkan algoritma arbitrasi penutupan bursa Spot Gold (XAU/USD) dan Kurs Rupiah semalam.")
     
     with st.spinner("Menarik data XAU/USD dan kurs Bank Indonesia secara real-time..."):
-        gold_close, gold_prev, idr_close, idr_prev = get_gold_data()
+        gold_close, gold_prev, idr_close, idr_prev, error_msg = get_gold_data()
         
     if not gold_close:
-        st.error("❌ Gagal menarik data global saat ini. Server Yahoo Finance mungkin sedang sibuk. Coba lagi nanti.")
+        st.error("❌ Gagal menarik data global saat ini. Server Yahoo Finance mungkin sedang sibuk atau menolak koneksi.")
+        # PERBAIKAN 3: Menampilkan pesan error asli agar mudah di-debug
+        if error_msg:
+            st.caption(f"**Detail Log Error (Untuk Developer):** `{error_msg}`")
         return
         
     # --- KALKULASI MATEMATIS QUANT ---
@@ -1397,7 +1411,7 @@ def show_gold_predictor():
     
     selisih = antam_now - antam_prev
     arah = "NAIK 📈" if selisih > 0 else "TURUN 📉"
-    warna = "normal" if selisih > 0 else "inverse" # Emas naik itu hijau, turun itu merah
+    warna = "normal" if selisih > 0 else "inverse" 
     
     # --- DASHBOARD KESIMPULAN ---
     st.info(f"💡 **Sinyal Pagi Ini:** Berdasarkan pergerakan semalam, harga Emas Antam 1 Gram diprediksi akan **{arah}** sekitar **Rp {abs(int(selisih)):,}**.")
