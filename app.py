@@ -620,15 +620,20 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
         st.subheader("🎯 Tindak Lanjut: Analisis Mendalam")
         st.markdown("Pilih saham yang lolos hari ini untuk langsung melihat grafiknya di Advanced Chart tanpa perlu mengetik ulang.")
         
+        # --- FUNGSI CALLBACK (Jalur Khusus Anti-Error) ---
+        def jump_to_chart():
+            st.session_state['target_saham'] = st.session_state['sb_select']
+            st.session_state['active_menu'] = "📊 Advanced Chart"
+        # -------------------------------------------------
+
         col1, col2 = st.columns([3, 1])
         with col1:
             saham_pilihan = st.selectbox("Saham Pilihan Anda:", st.session_state['screener_results'], key="sb_select")
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("📊 Buka Chart 🚀", use_container_width=True):
-                st.session_state['target_saham'] = st.session_state['sb_select']
-                st.session_state['active_menu'] = "📊 Advanced Chart"
-                st.rerun()
+            # Perhatikan tambahan parameter 'on_click=jump_to_chart' di bawah ini
+            # st.rerun() dihapus karena on_click otomatis me-restart layar
+            st.button("📊 Buka Chart 🚀", use_container_width=True, on_click=jump_to_chart)
 # --- 12. FITUR CHART DETAIL & LIVE AI PREDICTOR ---
 def show_chart(use_idx_data, market_choice):
     st.header("📊 Deep Analysis, Quant & AI Predictor")
