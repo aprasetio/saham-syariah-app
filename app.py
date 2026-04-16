@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 import feedparser
 import re
+import requests # Pastikan ini ada di bagian paling atas file app.py Anda
 
 # --- IMPORT MACHINE LEARNING ---
 from sklearn.neighbors import KNeighborsClassifier
@@ -1383,31 +1384,42 @@ def show_seasonality(market_choice):
             except Exception as e:
                 st.error(f"Terjadi kendala teknis: {e}")
                
+
+
+# --- FUNGSI BANTUAN PENYAMARAN (USER-AGENT) ---
+def get_yf_session():
+    """Membuat koneksi yang menyamar sebagai Browser Manusia Asli"""
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
+    })
+    return session
+
 # --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_gold_data():
-    """Penarik data instan untuk Morning Predictor (Lebih Stabil via yf.Ticker)"""
+    """Penarik data instan untuk Morning Predictor (Anti-Blokir)"""
     try:
-        # Menggunakan yf.Ticker() lebih stabil daripada yf.download() untuk aset tunggal
-        gold = yf.Ticker("XAUUSD=X").history(period="10d")
-        idr = yf.Ticker("IDR=X").history(period="10d")
+        session = get_yf_session()
+        gold = yf.Ticker("XAUUSD=X", session=session).history(period="10d")
         
-        # JIKA XAUUSD GAGAL, OTOMATIS PINDAH KE PLAN B (GC=F / Gold Futures)
         if gold.empty:
-            gold = yf.Ticker("GC=F").history(period="10d")
+            gold = yf.Ticker("GC=F", session=session).history(period="10d")
             if gold.empty:
-                return None, None, None, None, "Data XAUUSD dan GC=F keduanya kosong dari server."
+                return None, None, None, None, "Data kosong. Masih terblokir Rate Limit."
 
+        idr = yf.Ticker("IDR=X", session=session).history(period="10d")
         if idr.empty:
-            return None, None, None, None, "Data Kurs IDR=X kosong dari server."
+            return None, None, None, None, "Data IDR kosong."
 
-        # Ekstrak kolom harga penutupan (Close)
         gold_close_series = gold['Close'].dropna()
         idr_close_series = idr['Close'].dropna()
         
         if len(gold_close_series) < 2 or len(idr_close_series) < 2:
-            return None, None, None, None, f"Data hari tidak cukup. Emas: {len(gold_close_series)}, IDR: {len(idr_close_series)}"
+            return None, None, None, None, "Data hari tidak cukup."
         
         return float(gold_close_series.iloc[-1]), float(gold_close_series.iloc[-2]), float(idr_close_series.iloc[-1]), float(idr_close_series.iloc[-2]), None
     except Exception as e:
@@ -1415,16 +1427,44 @@ def get_gold_data():
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_historical_gold_idr(period="1y"):
-    """Peracik Grafik Sintesis Emas Murni Rupiah (Bebas Bug Timezone)"""
+    """Peracik Grafik Sintesis Emas Murni Rupiah (Anti-Blokir & Anti-Timezone Bug)"""
     try:
-        gold = yf.Ticker("XAUUSD=X").history(period=period)
+        session = get_yf_session()
+        gold = yf.Ticker("XAUUSD=X", session=session).history(period=period)
         if gold.empty:
-            gold = yf.Ticker("GC=F").history(period=period)
+            gold = yf.Ticker("GC=F", session=session).history(period=period)
             
-        idr = yf.Ticker("IDR=X").history(period=period)
+        idr = yf.Ticker("IDR=X", session=session).history(period=period)
         
         if gold.empty or idr.empty:
             return pd.DataFrame()
+            
+        # Normalisasi Zona Waktu
+        gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
+        idr.index = pd.to_datetime(idr.index).tz_localize(None).normalize()
+        
+        gold = gold[~gold.index.duplicated(keep='last')]
+        idr = idr[~idr.index.duplicated(keep='last')]
+        
+        gold_close = gold[['Close']].rename(columns={'Close': 'Gold_Close'})
+        idr_close = idr[['Close']].rename(columns={'Close': 'IDR_Close'})
+        
+        df_close = gold_close.join(idr_close, how='inner')
+        df_close = df_close.ffill().dropna()
+        
+        if df_close.empty: 
+            return pd.DataFrame()
+            
+        troy_ounce = 31.1034768
+        
+        df_close['Pure_IDR'] = (df_close['Gold_Close'] / troy_ounce) * df_close['IDR_Close']
+        df_close['RSI'] = df_close.ta.rsi(close='Pure_IDR', length=14)
+        df_close['SMA_50'] = df_close.ta.sma(close='Pure_IDR', length=50)
+        
+        return df_close
+    except Exception as e:
+        print(f"Error Chart Emas: {e}")
+        return pd.DataFrame()
             
         # --- KUNCI PERBAIKAN: BUANG ZONA WAKTU & AMBIL TANGGALNYA SAJA ---
         gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
