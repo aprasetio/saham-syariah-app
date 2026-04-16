@@ -651,6 +651,39 @@ def run_screener(use_idx_data, stock_list, category_name, market_choice):
             # Perhatikan tambahan parameter 'on_click=jump_to_chart' di bawah ini
             # st.rerun() dihapus karena on_click otomatis me-restart layar
             st.button("📊 Buka Chart 🚀", use_container_width=True, on_click=jump_to_chart)
+            
+    # ---------------------------------------------------------
+    # PASTE KODE INI DI BARIS PALING BAWAH FUNGSI run_screener
+    # ---------------------------------------------------------
+    
+    # Cek apakah pasar saham sedang jelek (Mode Proteksi Aktif atau Hasil Lapis 2 sedikit)
+    is_cash_is_king = (category_name == "Lapis 1 (JII30)" and use_idx_data and 'df_res' in locals() and len(df_res)==1 and df_res['Kode'].iloc[0]=='CASH')
+    pasar_berdarah = ('results' in locals() and len(results) < 3 and category_name != "Lapis 1 (JII30)")
+    
+    if is_cash_is_king or pasar_berdarah:
+        st.divider()
+        st.subheader("🚨 Macro-Asset Alert: Darurat Rotasi Aset!")
+        
+        if user_role == 'free':
+            st.info("🔒 **Sinyal Rotasi Aset Terkunci.** Member VIP otomatis mendapat rekomendasi perpindahan uang cash (ke Emas/RDPU) saat saham hancur.")
+            st.button("Buka Akses VIP 🚀", key="macro_upgrade")
+        else:
+            with st.spinner("Menganalisis pergerakan Emas Global sebagai alternatif..."):
+                try:
+                    gold_close, gold_prev, _, _, _ = get_gold_data() # Memanggil fungsi dari 14.8
+                    if gold_close and gold_prev:
+                        if gold_close > gold_prev:
+                            st.success("🛡️ **REKOMENDASI EMAS:** IHSG berisiko tinggi, tapi tren Emas Global sedang **NAIK**. Parkir dana Anda ke Emas Antam sementara waktu.")
+                            c1, c2 = st.columns([2, 1])
+                            with c1: st.metric("Emas Global (Real-time)", f"${gold_close:,.2f}/oz", f"+${gold_close-gold_prev:.2f}")
+                            with c2:
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                def jump_to_gold(): st.session_state['active_menu'] = "🥇 Emas & Safe Haven"
+                                st.button("📈 Buka Radar Emas", use_container_width=True, on_click=jump_to_gold)
+                        else:
+                            st.warning("💵 **PEGANG CASH (UANG TUNAI):** IHSG berisiko dan Emas Global juga terkoreksi. Simpan uang di RDN atau RDPU.")
+                except:
+                    pass
 # --- 12. FITUR CHART DETAIL & LIVE AI PREDICTOR ---
 def show_chart(use_idx_data, market_choice):
     st.header("📊 Deep Analysis, Quant & AI Predictor")
@@ -1348,18 +1381,16 @@ def show_seasonality(market_choice):
                 st.plotly_chart(fig_bar, use_container_width=True)
 
             except Exception as e:
-                st.error(f"Terjadi kendala teknis: {e}")
-# --- 14.8 FITUR BARU: PREDIKTOR EMAS ANTAM (SAFE HAVEN) ---
+                st.error(f"Terjadi kendala # --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_gold_data():
+    """Penarik data instan untuk Morning Predictor (10 Hari)"""
     try:
-        # PERBAIKAN 1: Gunakan XAUUSD=X (Spot) yang lebih stabil dari Futures. 
-        # Tarik 10 hari (bukan 5) untuk menjamin selalu ada minimal 2 hari kerja meskipun kena libur panjang.
         gold = yf.download("XAUUSD=X", period="10d", progress=False)
         idr = yf.download("IDR=X", period="10d", progress=False)
         
-        if gold.empty or idr.empty:
-            return None, None, None, None, "Data dari yfinance kembali kosong (Empty DataFrame)."
+        if gold.empty or idr.empty: return None, None, None, None, "Data kosong dari yfinance."
 
         if isinstance(gold.columns, pd.MultiIndex): gold.columns = gold.columns.get_level_values(0)
         if isinstance(idr.columns, pd.MultiIndex): idr.columns = idr.columns.get_level_values(0)
@@ -1367,77 +1398,110 @@ def get_gold_data():
         gold_close_series = gold['Close'].dropna()
         idr_close_series = idr['Close'].dropna()
         
-        # PERBAIKAN 2: Pastikan minimal ada 2 baris data sebelum mengambil index terakhir
         if len(gold_close_series) < 2 or len(idr_close_series) < 2:
-            return None, None, None, None, f"Jumlah data hari kerja kurang (Emas: {len(gold_close_series)} hari, IDR: {len(idr_close_series)} hari)."
+            return None, None, None, None, "Data hari kerja tidak cukup."
         
-        gold_close = gold_close_series.iloc[-1]
-        gold_prev = gold_close_series.iloc[-2]
-        
-        idr_close = idr_close_series.iloc[-1]
-        idr_prev = idr_close_series.iloc[-2]
-        
-        return float(gold_close), float(gold_prev), float(idr_close), float(idr_prev), None
+        return float(gold_close_series.iloc[-1]), float(gold_close_series.iloc[-2]), float(idr_close_series.iloc[-1]), float(idr_close_series.iloc[-2]), None
     except Exception as e:
-        # Menangkap pesan error asli dari Python
         return None, None, None, None, str(e)
 
-def show_gold_predictor():
-    st.header("🥇 Prediktor Harga Emas Antam (Morning Radar)")
-    st.markdown("Memprediksi pergerakan harga Emas Antam hari ini sebelum dirilis secara resmi, berdasarkan algoritma arbitrasi penutupan bursa Spot Gold (XAU/USD) dan Kurs Rupiah semalam.")
-    
-    with st.spinner("Menarik data XAU/USD dan kurs Bank Indonesia secara real-time..."):
-        gold_close, gold_prev, idr_close, idr_prev, error_msg = get_gold_data()
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_historical_gold_idr(period="1y"):
+    """Peracik Grafik Sintesis Emas Murni Rupiah (Tahap 2)"""
+    try:
+        data = yf.download(["XAUUSD=X", "IDR=X"], period=period, progress=False)
+        if isinstance(data.columns, pd.MultiIndex):
+            df_close = data['Close'].copy()
+        else:
+            return pd.DataFrame()
+            
+        df_close = df_close.ffill().dropna()
+        troy_ounce = 31.1034768
         
-    if not gold_close:
-        st.error("❌ Gagal menarik data global saat ini. Server Yahoo Finance mungkin sedang sibuk atau menolak koneksi.")
-        # PERBAIKAN 3: Menampilkan pesan error asli agar mudah di-debug
-        if error_msg:
-            st.caption(f"**Detail Log Error (Untuk Developer):** `{error_msg}`")
-        return
-        
-    # --- KALKULASI MATEMATIS QUANT ---
-    troy_ounce = 31.1034768 # Konstanta emas dunia
-    
-    # 1. Harga Murni Global per Gram (Tanpa Biaya Cetak)
-    pure_gold_now = (gold_close / troy_ounce) * idr_close
-    pure_gold_prev = (gold_prev / troy_ounce) * idr_prev
-    
-    # 2. Asumsi Premium Antam (Margin, Biaya Cetak, Asuransi, PPh 22) -> Rata-rata 13% untuk kepingan 1 Gram
-    premium_margin = 0.13 
-    
-    antam_now = pure_gold_now * (1 + premium_margin)
-    antam_prev = pure_gold_prev * (1 + premium_margin)
-    
-    selisih = antam_now - antam_prev
-    arah = "NAIK 📈" if selisih > 0 else "TURUN 📉"
-    warna = "normal" if selisih > 0 else "inverse" 
-    
-    # --- DASHBOARD KESIMPULAN ---
-    st.info(f"💡 **Sinyal Pagi Ini:** Berdasarkan pergerakan semalam, harga Emas Antam 1 Gram diprediksi akan **{arah}** sekitar **Rp {abs(int(selisih)):,}**.")
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Emas Global (XAU/USD)", f"${gold_close:,.2f} /oz", f"${gold_close - gold_prev:,.2f} /oz")
-    # Kurs terbalik warnanya: USD naik = Rupiah melemah (Merah), USD turun = Rupiah menguat (Hijau)
-    c2.metric("Kurs Rupiah (USD/IDR)", f"Rp {idr_close:,.0f}", f"Rp {idr_close - idr_prev:,.0f}", delta_color="inverse")
-    c3.metric("Prediksi Antam (1 Gram)", f"Rp {int(antam_now):,}", f"Rp {int(selisih):,}", delta_color=warna)
-    
-    st.divider()
-    
-    # --- FITUR INTERAKTIF SIMULASI ---
-    st.subheader("⚙️ Kalkulator Arbitrasi Fisik")
-    st.markdown("Harga fisik bervariasi tergantung kepingan. Keping 100 Gram memiliki biaya cetak (premium) yang jauh lebih murah dibanding 1 Gram.")
-    
-    c_calc1, c_calc2 = st.columns(2)
-    with c_calc1:
-        custom_premium = st.slider("Sesuaikan Margin/Premium Fisik (%)", min_value=3.0, max_value=20.0, value=13.0, step=0.5, help="Pilih 3-5% untuk kepingan besar (100g), atau 12-15% untuk kepingan kecil (1g).")
-    
-    with c_calc2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        custom_antam = pure_gold_now * (1 + (custom_premium/100))
-        st.success(f"Estimasi Harga: **Rp {int(custom_antam):,}/gram**")
-        st.caption(f"*Harga Murni (Tanpa Cetak): Rp {int(pure_gold_now):,}/gram*")
+        # SINTESIS EMAS RUPIAH
+        df_close['Pure_IDR'] = (df_close['XAUUSD=X'] / troy_ounce) * df_close['IDR=X']
+        df_close['RSI'] = df_close.ta.rsi(close='Pure_IDR', length=14)
+        df_close['SMA_50'] = df_close.ta.sma(close='Pure_IDR', length=50)
+        return df_close
+    except Exception as e:
+        return pd.DataFrame()
 
+def show_gold_predictor():
+    st.header("🥇 Emas Antam & Makro Safe Haven")
+    
+    tab1, tab2 = st.tabs(["🌅 Morning Predictor (Harian)", "📡 Radar Diskon Fisik (Sinyal Beli)"])
+    
+    # === TAB 1: MORNING PREDICTOR (GRATIS) ===
+    with tab1:
+        st.subheader("Prediksi Harga Antam Hari Ini")
+        st.markdown("Memprediksi arah harga Emas Antam sebelum rilis resmi dengan algoritma arbitrasi penutupan pasar New York.")
+        
+        with st.spinner("Menarik harga penutupan XAU/USD dan kurs Bank Indonesia semalam..."):
+            gold_close, gold_prev, idr_close, idr_prev, error_msg = get_gold_data()
+            
+        if not gold_close:
+            st.error("❌ Gagal menarik data global saat ini.")
+            if error_msg: st.caption(f"*Log: {error_msg}*")
+        else:
+            troy_ounce = 31.1034768 
+            pure_gold_now = (gold_close / troy_ounce) * idr_close
+            pure_gold_prev = (gold_prev / troy_ounce) * idr_prev
+            premium_margin = 0.13 
+            
+            antam_now = pure_gold_now * (1 + premium_margin)
+            antam_prev = pure_gold_prev * (1 + premium_margin)
+            selisih = antam_now - antam_prev
+            
+            arah = "NAIK 📈" if selisih > 0 else "TURUN 📉"
+            warna = "normal" if selisih > 0 else "inverse" 
+            
+            st.info(f"💡 **Sinyal Hari Ini:** Harga Emas Antam 1 Gram diprediksi **{arah}** sekitar **Rp {abs(int(selisih)):,}**.")
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Emas Global (XAU/USD)", f"${gold_close:,.2f} /oz", f"${gold_close - gold_prev:,.2f}")
+            c2.metric("Kurs Rupiah (USD/IDR)", f"Rp {idr_close:,.0f}", f"Rp {idr_close - idr_prev:,.0f}", delta_color="inverse")
+            c3.metric("Prediksi Antam (1 Gram)", f"Rp {int(antam_now):,}", f"Rp {int(selisih):,}", delta_color=warna)
+            
+            st.divider()
+            st.subheader("⚙️ Kalkulator Arbitrasi Fisik")
+            c_calc1, c_calc2 = st.columns(2)
+            with c_calc1: custom_premium = st.slider("Margin Cetak (%)", 3.0, 20.0, 13.0, 0.5, help="100g=3-5%, 1g=12-15%")
+            with c_calc2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.success(f"Estimasi Harga Butik: **Rp {int(pure_gold_now * (1 + (custom_premium/100))):,}/gram**")
+
+    # === TAB 2: RADAR DISKON FISIK (VIP ONLY) ===
+    with tab2:
+        st.subheader("📡 Radar Kuantitatif Emas Rupiah")
+        
+        if user_role == 'free':
+            st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+            st.info("**Sinyal Beli Emas Fisik!**\nSistem kami otomatis mendeteksi saat harga emas fisik *Oversold* (Diskon) akibat anomali Kurs Rupiah dan memberikan notifikasi **💎 STRONG BUY FISIK**.")
+            st.button("Upgrade ke VIP Sekarang 🚀", key="gold_upgrade")
+            return
+            
+        st.markdown("Grafik Emas Murni Rupiah. Beli emas fisik saat indikator RSI menembus area bawah (Oversold).")
+        
+        with st.spinner("Meracik grafik Emas sintesis..."):
+            df_hist = get_historical_gold_idr("1y")
+            
+        if not df_hist.empty:
+            rsi = df_hist.iloc[-1].get('RSI', 50)
+            if rsi < 30: st.success(f"💎 **STRONG BUY FISIK!** (RSI: {rsi:.1f}) - Emas Rupiah sedang diskon besar (Oversold). Borong Antam!")
+            elif rsi > 70: st.error(f"⚠️ **MAHAL / OVERBOUGHT** (RSI: {rsi:.1f}) - Tahan nafsu membeli. Tunggu koreksi.")
+            else: st.info(f"⚖️ **NETRAL** (RSI: {rsi:.1f}) - Harga wajar. Cocok untuk cicil nabung rutin (DCA).")
+            
+            from plotly.subplots import make_subplots
+            import plotly.graph_objects as go
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.1)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Pure_IDR'], name="Harga IDR/Gram", line=dict(color='gold')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['SMA_50'], name="MA 50", line=dict(color='blue', dash='dot')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['RSI'], name="RSI", line=dict(color='purple')), row=2, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+            fig.update_layout(height=600, template="plotly_dark", showlegend=False, margin=dict(l=0, r=0, t=20, b=0))
+            st.plotly_chart(fig, use_container_width=True)
+            
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
