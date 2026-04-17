@@ -242,7 +242,7 @@ st.markdown("""
 # --- 7. DAFTAR SAHAM (Lapis 1, Lapis 2, & Wall Street) ---
 SHARIA_STOCKS = ["ADRO", "AKRA", "ANTM", "BRIS", "BRPT", "CPIN", "EXCL", "HRUM", "ICBP", "INCO", "INDF", "INKP", "INTP", "ITMG", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SMGR", "TLKM", "UNTR", "UNVR", "ACES", "AMRT", "ASII", "TPIA"]
 SHARIA_MIDCAP_STOCKS = ["BRMS", "ELSA", "ENRG", "PTRO", "SIDO", "MYOR", "ESSA", "CTRA", "BSDE", "SMRA", "PWON", "ARTO", "BTPS", "MIKA", "HEAL", "SILO", "MAPA", "AUTO", "SMSM", "TAPG", "DSNG", "LSIP", "AALI", "WIKA", "PTPP", "TOTL", "NRCA", "SCMA", "MNCN", "ERAA"]
-US_STOCKS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "LLY", "JPM", "V", "MA", "UNH", "HD", "PG", "COST", "JNJ", "NFLX", "AMD", "CRM"]
+US_STOCKS = ["PGEO", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "LLY", "JPM", "V", "MA", "UNH", "HD", "PG", "COST", "JNJ", "NFLX", "AMD", "CRM"]
 IDX_API_KEY = st.secrets.get("IDX_API_KEY", "")
 
 # --- 8. HELPER FUNCTIONS ---
@@ -812,7 +812,7 @@ def show_chart(use_idx_data, market_choice):
             # --- JEMBATAN PINTAR (SMART BRIDGE) ---
             # Menangkap saham dari memori lemparan Screener
             default_ticker = st.session_state.get('target_saham', '')
-            ticker = st.text_input("🔍 Masukkan Kode Saham (Contoh: BBCA / AAPL):", default_ticker).upper()
+            ticker = st.text_input("🔍 Masukkan Kode Saham (Contoh: ADRO / PGEO):", default_ticker).upper()
         with c_btn:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_search = st.form_submit_button("Cari Saham 🔍")
@@ -975,6 +975,9 @@ def show_chart(use_idx_data, market_choice):
             st.plotly_chart(fig, use_container_width=True)
 
 # --- 13. FITUR ADMIN DASHBOARD ---
+# ==============================================================================
+# --- FITUR ADMIN DASHBOARD (CONTROL PANEL) ---
+# ==============================================================================
 def show_admin_dashboard():
     st.header("👑 Admin Dashboard & Control Panel")
     st.markdown("Pusat kendali akun, kuota API, dan analitik pengguna secara *real-time*.")
@@ -1012,8 +1015,8 @@ def show_admin_dashboard():
                     target_email = c_mail.selectbox("Pilih Email User:", df_users['email'].unique())
                     u_data = df_users[df_users['email'] == target_email].iloc[0]
                     
-                    # Mapping Role yang Anda gunakan
-                    roles = ["free", "trial", "pro", "admin"]
+                    # Mapping Role yang Anda gunakan (ditambahkan 'vip' untuk kelengkapan)
+                    roles = ["free", "trial", "pro", "vip", "admin"]
                     idx_role = roles.index(u_data['role']) if u_data['role'] in roles else 0
                     
                     new_role = c_role.selectbox("Role Baru:", roles, index=idx_role)
@@ -1036,11 +1039,14 @@ def show_admin_dashboard():
                 
                 # Menghitung Sisa Kuota untuk ditampilkan di tabel
                 df_view = df_users.copy()
+                df_view['daily_quota'] = df_view['daily_quota'].fillna(0).astype(int)
+                df_view['used_quota'] = df_view['used_quota'].fillna(0).astype(int)
                 df_view['Sisa Kuota'] = df_view['daily_quota'] - df_view['used_quota']
                 
                 # Memilih kolom yang ingin ditampilkan (Proteksi agar tidak error jika kolom absen)
                 cols_display = ['email', 'role', 'daily_quota', 'used_quota', 'Sisa Kuota']
                 if 'created_at' in df_view.columns:
+                    df_view['created_at'] = pd.to_datetime(df_view['created_at']).dt.strftime('%Y-%m-%d %H:%M')
                     cols_display.append('created_at')
                 
                 # Filter hanya kolom yang ada
@@ -1054,34 +1060,9 @@ def show_admin_dashboard():
         except Exception as e:
             st.error(f"Gagal memuat manajemen pengguna: {e}")
 
-    # --- TAB 2 & 3: LOG EKSISTING ANDA ---
+    # --- TAB 2: LOG PERSETUJUAN TOS ---
     with tab2:
         if st.button("Muat Data Persetujuan ToS", type="primary", key="btn_tos"):
-            try:
-                res = supabase.table('audit_logs').select('*').eq('action', 'LOGIN_TOS_ACCEPTED').order('created_at', desc=True).limit(100).execute()
-                if res.data:
-                    df = pd.DataFrame(res.data)
-                    df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
-                    st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
-                else: st.info("Belum ada data.")
-            except: st.error("Gagal menarik data log.")
-
-    with tab3:
-        if st.button("Muat Data Pencarian Saham", type="primary", key="btn_search"):
-            try:
-                res = supabase.table('audit_logs').select('*').eq('action', 'SEARCH_CHART').order('created_at', desc=True).limit(100).execute()
-                if res.data:
-                    df = pd.DataFrame(res.data)
-                    df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
-                    st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
-                else: st.info("Belum ada data.")
-            except: st.error("Gagal menarik data log.")
-
-    # ==========================================
-    # TAB 2 & 3: KODE EKSISTING ANDA
-    # ==========================================
-    with tab2:
-        if st.button("Muat Data Persetujuan ToS", type="primary"):
             with st.spinner("Mengambil log..."):
                 try:
                     res = supabase.table('audit_logs').select('*').eq('action', 'LOGIN_TOS_ACCEPTED').order('created_at', desc=True).limit(100).execute()
@@ -1090,10 +1071,11 @@ def show_admin_dashboard():
                         df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
                         st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
                     else: st.info("Belum ada data.")
-                except: st.error("Gagal menarik data.")
+                except: st.error("Gagal menarik data log.")
 
+    # --- TAB 3: LOG PENCARIAN SAHAM ---
     with tab3:
-        if st.button("Muat Data Pencarian Saham", type="primary"):
+        if st.button("Muat Data Pencarian Saham", type="primary", key="btn_search"):
             with st.spinner("Mengambil log..."):
                 try:
                     res = supabase.table('audit_logs').select('*').eq('action', 'SEARCH_CHART').order('created_at', desc=True).limit(100).execute()
@@ -1102,7 +1084,7 @@ def show_admin_dashboard():
                         df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
                         st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
                     else: st.info("Belum ada data.")
-                except: st.error("Gagal menarik data.")
+                except: st.error("Gagal menarik data log.")
                 
 # --- 14. PUSAT EDUKASI & STRATEGI TRADING ---
 def show_education():
@@ -1452,7 +1434,7 @@ def show_seasonality(market_choice):
     with st.form(key='season_form'):
         col1, col2 = st.columns([3, 1])
         with col1:
-            ticker = st.text_input("🔍 Kode Saham (Contoh: BBCA / BUMI):", st.session_state.get('target_saham', '')).upper()
+            ticker = st.text_input("🔍 Kode Saham (Contoh: ADRO / PGEO):", st.session_state.get('target_saham', '')).upper()
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             submit_season = st.form_submit_button("Analisis Siklus 🔍", use_container_width=True)
@@ -1963,7 +1945,7 @@ def show_portfolio_advisor():
     with st.expander("➕ Tambah / Edit Saham", expanded=True):
         with st.form("add_porto_form", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
-            with c1: input_sym = st.text_input("Kode Saham (cth: BBCA)").upper()
+            with c1: input_sym = st.text_input("Kode Saham (cth: ADRO)").upper()
             with c2: input_price = st.number_input("Harga Beli Rata-rata (Rp)", min_value=1.0, step=50.0)
             with c3: input_lot = st.number_input("Jumlah Lot", min_value=1, step=1)
             
@@ -2165,7 +2147,7 @@ st.sidebar.divider()
 if 'active_menu' not in st.session_state:
     st.session_state['active_menu'] = "🔍 Super Screener"
 if 'target_saham' not in st.session_state:
-    st.session_state['target_saham'] = "BBCA"
+    st.session_state['target_saham'] = ""
 
 # DAFTAR MENU
 menu_options = [
