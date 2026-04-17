@@ -976,13 +976,93 @@ def show_chart(use_idx_data, market_choice):
 
 # --- 13. FITUR ADMIN DASHBOARD ---
 def show_admin_dashboard():
-    st.header("👑 Admin Dashboard & Audit Logs")
+    st.header("👑 Admin Dashboard & Control Panel")
     st.markdown("Pusat kendali intelijen dan analitik pengguna. Data ditarik secara *real-time* dari server.")
+
+    # PROTEKSI KEAMANAN GANDA
+    if not is_admin:
+        st.error("🚨 AKSES DITOLAK: Halaman ini hanya untuk Administrator Sistem.")
+        st.stop()
+
     st.divider()
 
-    tab1, tab2 = st.tabs(["📜 Log Persetujuan ToS", "🔍 Log Pencarian Saham"])
+    # MENGGABUNGKAN FITUR BARU DENGAN TAB EKSISTING ANDA
+    tab1, tab2, tab3 = st.tabs(["👥 Manajemen Pengguna", "📜 Log Persetujuan ToS", "🔍 Log Pencarian Saham"])
 
+    # ==========================================
+    # TAB 1: MANAJEMEN USER (FITUR BARU)
+    # ==========================================
     with tab1:
+        st.subheader("Data Pengguna & Status Langganan")
+        try:
+            # Tarik data terbaru dari tabel profiles
+            res_users = supabase.table('profiles').select('*').execute()
+            df_users = pd.DataFrame(res_users.data)
+
+            if not df_users.empty:
+                # 1. Metrik Ringkasan (Dinamis membaca role: free, pro, trial, dll)
+                role_counts = df_users['role'].value_counts()
+                
+                st.markdown("##### 📈 Distribusi Pengguna")
+                cols = st.columns(len(role_counts))
+                for i, (role_name, count) in enumerate(role_counts.items()):
+                    cols[i].metric(f"Role: {role_name.upper()}", f"{count} User")
+
+                st.divider()
+
+                # 2. Alat Pengubah Role (Upgrade / Downgrade)
+                st.markdown("##### ⚙️ Update Status Langganan")
+                with st.expander("Klik untuk mengubah Role / Akses User", expanded=True):
+                    c_email, c_role, c_btn = st.columns([2, 1, 1])
+                    
+                    target_email = c_email.selectbox("Pilih Email Pengguna:", df_users['email'].unique())
+                    current_user_data = df_users[df_users['email'] == target_email].iloc[0]
+                    
+                    # Menampilkan list lengkap yang Anda gunakan
+                    role_list = ["free", "trial", "pro", "admin"]
+                    current_idx = role_list.index(current_user_data['role']) if current_user_data['role'] in role_list else 0
+                    
+                    new_role = c_role.selectbox("Ubah Ke Role:", role_list, index=current_idx)
+
+                    c_btn.markdown("<br>", unsafe_allow_html=True)
+                    if c_btn.button("Update Role", type="primary", use_container_width=True):
+                        # Update ke Database
+                        supabase.table('profiles').update({'role': new_role}).eq('id', current_user_data['id']).execute()
+                        
+                        # Catat aktivitas ini ke dalam Audit Log Anda!
+                        try:
+                            supabase.table('audit_logs').insert({
+                                "user_email": user_email, "action": "ADMIN_CHANGE_ROLE", 
+                                "details": f"Admin mengubah role {target_email} dari {current_user_data['role']} menjadi {new_role}"
+                            }).execute()
+                        except: pass
+                        
+                        st.success(f"Berhasil! {target_email} diperbarui menjadi {new_role.upper()}")
+                        time.sleep(1)
+                        st.rerun()
+
+                # 3. Tabel Data Pengguna (Dengan Proteksi Kolom missing_index)
+                st.markdown("##### 📋 Daftar Profil Database")
+                cols_to_show = ['email', 'role']
+                if 'created_at' in df_users.columns:
+                    cols_to_show.append('created_at')
+                
+                df_final = df_users[cols_to_show].copy()
+                
+                if 'created_at' in df_final.columns:
+                    df_final['created_at'] = pd.to_datetime(df_final['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+                
+                st.dataframe(df_final, use_container_width=True, hide_index=True)
+
+            else:
+                st.info("Belum ada data pengguna di database.")
+        except Exception as e:
+            st.error(f"Gagal memuat data pengguna: {e}")
+
+    # ==========================================
+    # TAB 2 & 3: KODE EKSISTING ANDA
+    # ==========================================
+    with tab2:
         if st.button("Muat Data Persetujuan ToS", type="primary"):
             with st.spinner("Mengambil log..."):
                 try:
@@ -994,7 +1074,7 @@ def show_admin_dashboard():
                     else: st.info("Belum ada data.")
                 except: st.error("Gagal menarik data.")
 
-    with tab2:
+    with tab3:
         if st.button("Muat Data Pencarian Saham", type="primary"):
             with st.spinner("Mengambil log..."):
                 try:
