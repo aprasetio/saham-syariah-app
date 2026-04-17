@@ -1,16 +1,28 @@
+# --- 1. MODUL INTI STREAMLIT & UI ---
 import streamlit as st
-import yfinance as yf
-import pandas as pd
-import pandas_ta as ta
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
-import requests
-import numpy as np
 import time
+
+# --- 2. MODUL PENGOLAHAN DATA & ANGKA ---
+import pandas as pd
+import numpy as np
+import pandas_ta as ta
+
+# --- 3. MODUL WAKTU & KALENDER ---
 from datetime import datetime, timedelta
+import calendar # <-- TAMBAHAN WAJIB UNTUK FASE 2 (SEASONALITY)
+
+# --- 4. MODUL VISUALISASI GRAFIK ---
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# --- 5. MODUL DATA PIHAK KETIGA ---
+import yfinance as yf
+import feedparser # Untuk Radar Sentimen Berita
+import re # Untuk Regex/Pembersihan Teks
+import requests # Biarkan jika dipakai untuk API lain, hapus jika tidak
+
+# --- 6. MODUL DATABASE & CLOUD ---
 from supabase import create_client, Client
-import feedparser
-import re
 
 # --- IMPORT MACHINE LEARNING ---
 from sklearn.neighbors import KNeighborsClassifier
@@ -1331,19 +1343,7 @@ def show_news_sentiment(market_choice):
                 st.error(f"Gagal menyapu berita lokal: {e}")
 # --- 14.7 FITUR BARU: PETA PROBABILITAS MUSIMAN (SEASONALITY HEATMAP) ---
 def show_seasonality(market_choice):
-    st.header("🗓️ Peta Probabilitas Musiman (Seasonality)")
-    
-    # --- PROTEKSI VIP ---
-    if user_role == 'free':
-        st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
-        st.info("""
-        **Apa itu Seasonality (Musiman)?**
-        Bursa saham memiliki siklus berulang. Saham cenderung memiliki pola performa yang sama di bulan-bulan tertentu (seperti *Window Dressing* di Desember).
-        """)
-        st.button("Upgrade ke VIP Sekarang 🚀", key="season_upgrade")
-        return
-    # --- END PROTEKSI ---
-
+    st.header("🗓️ Peta Probabilitas Musiman & Risiko")
     st.markdown("Mendeteksi pola siklus bulanan saham dalam 10 tahun terakhir dengan cerdas via Database & Cloud.")
 
     with st.form(key='season_form'):
@@ -1362,22 +1362,20 @@ def show_seasonality(market_choice):
 
             try:
                 # --- INTEGRASI LAZY LOADING (OPTIMASI DATABASE) ---
-                # Menggunakan fungsi yang kita buat sebelumnya
                 df = get_lazy_historical_data(symbol, period="10y")
                 
                 if df.empty:
                     st.error(f"❌ Data saham {ticker_only} tidak ditemukan.")
                     return
                 
-                # Standarisasi Kolom (Hanya ambil Close)
+                # Standarisasi Kolom
                 close_data = df['Close'].squeeze()
                 
-                if len(close_data) < 60:
-                    st.warning("⚠️ Data histori terlalu pendek untuk analisis musiman (Minimal 5 tahun idealnya).")
+                if len(close_data) < 250 * 5: # Kurang lebih 5 tahun trading days
+                    st.warning("⚠️ Data histori terlalu pendek untuk analisis musiman yang akurat (Minimal 5 tahun idealnya).")
                     return
 
                 # --- PENGOLAHAN DATA BULANAN ---
-                # Mencoba frekuensi ME (Month End) terbaru atau fallback ke M
                 try:
                     df_monthly = close_data.resample('ME').last()
                 except:
@@ -1392,71 +1390,130 @@ def show_seasonality(market_choice):
                 pivot = df_ret.pivot(index='Year', columns='Month', values='Return')
                 month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
                 
-                # Pastikan 12 kolom tersedia
                 for m in range(1, 13):
                     if m not in pivot.columns: pivot[m] = np.nan
                 pivot = pivot[[m for m in range(1, 13)]]
 
-                # Statistik
                 win_rate = (pivot > 0).sum() / pivot.notna().sum() * 100
                 avg_return = pivot.mean()
                 win_rate = win_rate.fillna(0)
                 avg_return = avg_return.fillna(0)
 
-                # --- TAMPILAN DASHBOARD ---
-                st.subheader(f"📊 Rapor Musiman {ticker_only}")
-                
-                best_idx = avg_return.idxmax()
-                worst_idx = avg_return.idxmin()
+                # Data Bulan Saat Ini
                 curr_month = datetime.now().month
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Bulan Terbaik", month_names[best_idx-1], f"Avg: +{avg_return[best_idx]:.1f}%")
-                c2.metric("Bulan Terburuk", month_names[worst_idx-1], f"Avg: {avg_return[worst_idx]:.1f}%", delta_color="inverse")
-                
-                # Probabilitas Bulan Ini
+                curr_month_name = month_names[curr_month-1]
                 this_month_win = win_rate.get(curr_month, 0)
                 this_month_avg = avg_return.get(curr_month, 0)
-                c3.metric(f"Probabilitas {month_names[curr_month-1]}", f"{this_month_win:.0f}% Hijau", f"Avg: {this_month_avg:.1f}%")
 
-                st.divider()
+                # ==========================================
+                # AKSES GRATIS (TEASER BULAN INI)
+                # ==========================================
+                if user_role == 'free':
+                    st.subheader(f"📊 Radar Siklus {ticker_only}: Bulan {curr_month_name}")
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric(f"Probabilitas Naik ({curr_month_name})", f"{this_month_win:.0f}%")
+                    c2.metric("Rata-rata Return", f"{this_month_avg:.2f}%", delta_color="normal" if this_month_avg > 0 else "inverse")
+                    
+                    st.divider()
+                    st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+                    st.info("Sebagai pengguna gratis, Anda hanya dapat melihat probabilitas untuk bulan yang sedang berjalan.\n\n**Upgrade ke VIP untuk membuka:**\n1. 🗺️ **Heatmap 10 Tahun** (Lihat bulan apa saham ini paling sering naik)\n2. ⚠️ **Risiko Terburuk / Max Drawdown**\n3. 📅 **Efek Hari Perdagangan** (Hari apa yang paling menguntungkan?)")
+                    st.button("Upgrade ke VIP Sekarang 🚀", key="season_upgrade")
+                    return # Hentikan proses di sini untuk user gratis
 
-                # --- HEATMAP VISUALIZATION ---
-                # Membulatkan nilai untuk teks di dalam box
-                text_vals = pivot.copy().values
-                formatted_text = [[f"{val:.1f}%" if pd.notna(val) else "-" for val in row] for row in text_vals]
-
-                fig = go.Figure(data=go.Heatmap(
-                    z=pivot.values,
-                    x=month_names,
-                    y=pivot.index,
-                    text=formatted_text,
-                    texttemplate="%{text}",
-                    colorscale="RdYlGn",
-                    zmid=0,
-                    showscale=True,
-                    colorbar=dict(title="Return %")
-                ))
-
-                fig.update_layout(
-                    height=500,
-                    template="plotly_dark",
-                    margin=dict(l=0, r=0, t=30, b=0),
-                    yaxis=dict(title="Tahun", tickmode="linear"),
-                    xaxis=dict(side="top")
-                )
+                # ==========================================
+                # AKSES VIP (FULL INSTITUTIONAL DASHBOARD)
+                # ==========================================
+                st.success("💎 **VIP Access:** Menampilkan Analisis Risiko Level Institusi.")
                 
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Tambahan: Grafik Bar Rata-rata Win Rate per Bulan
-                st.subheader("📈 Probabilitas Kenaikan per Bulan (%)")
-                fig_bar = go.Figure(go.Bar(
-                    x=month_names,
-                    y=win_rate.values,
-                    marker_color=['green' if w > 50 else 'red' for w in win_rate.values]
-                ))
-                fig_bar.update_layout(height=300, template="plotly_dark", yaxis_title="Win Rate %", margin=dict(l=0, r=0, t=10, b=0))
-                st.plotly_chart(fig_bar, use_container_width=True)
+                tab1, tab2 = st.tabs(["🗺️ Peta Musiman 10 Tahun", "📅 Efek Hari & Drawdown Risiko"])
+
+                with tab1:
+                    st.subheader(f"📊 Rapor Musiman {ticker_only}")
+                    
+                    best_idx = avg_return.idxmax()
+                    worst_idx = avg_return.idxmin()
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Bulan Terbaik", month_names[best_idx-1], f"Avg: +{avg_return[best_idx]:.1f}%")
+                    c2.metric("Bulan Terburuk", month_names[worst_idx-1], f"Avg: {avg_return[worst_idx]:.1f}%", delta_color="inverse")
+                    c3.metric(f"Probabilitas {curr_month_name} (Ini)", f"{this_month_win:.0f}% Hijau", f"Avg: {this_month_avg:.1f}%")
+
+                    st.divider()
+
+                    # Heatmap Visualization
+                    text_vals = pivot.copy().values
+                    formatted_text = [[f"{val:.1f}%" if pd.notna(val) else "-" for val in row] for row in text_vals]
+
+                    fig = go.Figure(data=go.Heatmap(
+                        z=pivot.values,
+                        x=month_names,
+                        y=pivot.index,
+                        text=formatted_text,
+                        texttemplate="%{text}",
+                        colorscale="RdYlGn",
+                        zmid=0,
+                        showscale=True,
+                        colorbar=dict(title="Return %")
+                    ))
+
+                    fig.update_layout(
+                        height=500,
+                        template="plotly_dark",
+                        margin=dict(l=0, r=0, t=30, b=0),
+                        yaxis=dict(title="Tahun", tickmode="linear"),
+                        xaxis=dict(side="top")
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # FITUR BARU VIP: MANAJEMEN RISIKO & EFEK HARI
+                with tab2:
+                    c_risk1, c_risk2 = st.columns(2)
+                    
+                    with c_risk1:
+                        st.subheader("⚠️ Max Drawdown (Risiko)")
+                        st.markdown("Penurunan bulanan **terdalam** yang pernah terjadi dalam 10 tahun.")
+                        
+                        # Hitung nilai minimum (Drawdown) di setiap bulan
+                        min_returns = pivot.min()
+                        
+                        fig_dd = go.Figure(go.Bar(
+                            x=month_names, 
+                            y=min_returns.values,
+                            marker_color=['red' if val < 0 else 'green' for val in min_returns.values]
+                        ))
+                        fig_dd.update_layout(height=350, template="plotly_dark", yaxis_title="Drawdown (%)", margin=dict(l=0, r=0, t=10, b=0))
+                        st.plotly_chart(fig_dd, use_container_width=True)
+
+                    with c_risk2:
+                        st.subheader("📅 Efek Hari Perdagangan")
+                        st.markdown("Probabilitas saham ditutup **Hijau (Naik)** berdasarkan hari.")
+                        
+                        # Hitung Win-Rate Harian dari raw dataframe
+                        daily_df = df.copy()
+                        if 'Open' in daily_df.columns:
+                            daily_df['Is_Up'] = daily_df['Close'] > daily_df['Open']
+                        else:
+                            daily_df['Is_Up'] = daily_df['Close'] > daily_df['Close'].shift(1)
+                            
+                        daily_df['DayOfWeek'] = daily_df.index.dayofweek
+                        day_stats = daily_df.groupby('DayOfWeek')['Is_Up'].mean() * 100
+                        
+                        # Format label hari (Senin = 0, Jumat = 4)
+                        hari_indo = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat']
+                        day_stats = day_stats[day_stats.index < 5] # Abaikan jika ada data anomali di akhir pekan
+                        day_stats.index = [hari_indo[i] for i in day_stats.index]
+                        
+                        fig_day = go.Figure(go.Scatter(
+                            x=day_stats.index, 
+                            y=day_stats.values,
+                            mode='lines+markers', 
+                            marker=dict(size=10, color='cyan'), 
+                            line=dict(color='cyan', width=3)
+                        ))
+                        fig_day.add_hline(y=50, line_dash="dash", line_color="gray", annotation_text="Batas 50%")
+                        fig_day.update_layout(height=350, template="plotly_dark", yaxis_title="Win-Rate (%)", margin=dict(l=0, r=0, t=10, b=0))
+                        st.plotly_chart(fig_day, use_container_width=True)
 
             except Exception as e:
                 st.error(f"Terjadi kendala teknis: {e}")
