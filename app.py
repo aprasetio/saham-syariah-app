@@ -1939,61 +1939,60 @@ def get_current_prices(symbols):
 
 def show_portfolio_advisor():
     st.header("💼 Robo-Advisor & Portfolio Manager")
-    st.markdown("Asisten AI untuk menganalisis kesehatan, alokasi portofolio, dan rekapitulasi PnL Anda.")
+    st.markdown("Asisten AI portofolio yang ramah untuk perangkat Mobile dan Desktop.")
     st.divider()
 
     # --- 1. SINKRONISASI DATABASE KE MEMORI ---
-    # Tarik data dari Supabase saat pertama kali memuat agar portofolio tidak hilang
     if 'portfolio_data' not in st.session_state:
         try:
             res = supabase.table('user_portfolios').select('*').eq('user_id', user_id).execute()
             if res.data:
                 df_db = pd.DataFrame(res.data)
+                # Tambahkan kolom "Hapus" secara otomatis di memori
                 st.session_state['portfolio_data'] = pd.DataFrame({
+                    "Hapus": [False] * len(df_db),
                     "Kode Saham": df_db['symbol'],
                     "Harga Beli": df_db['avg_price'].astype(int),
                     "Jumlah Lot": df_db['total_lot'].astype(int)
                 })
             else:
-                st.session_state['portfolio_data'] = pd.DataFrame(columns=["Kode Saham", "Harga Beli", "Jumlah Lot"])
+                st.session_state['portfolio_data'] = pd.DataFrame(columns=["Hapus", "Kode Saham", "Harga Beli", "Jumlah Lot"])
         except:
-            st.session_state['portfolio_data'] = pd.DataFrame(columns=["Kode Saham", "Harga Beli", "Jumlah Lot"])
+            st.session_state['portfolio_data'] = pd.DataFrame(columns=["Hapus", "Kode Saham", "Harga Beli", "Jumlah Lot"])
 
-    # --- PEMBUATAN 3 TAB UTAMA ---
-    tab1, tab2, tab3 = st.tabs(["📈 Portofolio Aktif", "💰 Histori Penjualan (PnL)", "🛡️ Analisis & Dividen"])
+    tab1, tab2, tab3 = st.tabs(["📈 Portofolio", "💰 Jual (PnL)", "🛡️ Analisis"])
 
     # ==========================================
-    # TAB 1: PORTOFOLIO AKTIF (DATA EDITOR)
+    # TAB 1: PORTOFOLIO AKTIF (OPTIMAL MOBILE)
     # ==========================================
     with tab1:
-        st.subheader("📝 Kelola Saham Aktif")
-        st.info("💡 **TIPS INTERAKTIF:** Klik sel pada tabel di bawah untuk **mengubah angka (Edit)**. Ketik di baris paling bawah yang berlogo '+' untuk **menambah saham baru**. Klik kotak di paling kiri lalu tekan 'Delete' di keyboard untuk **menghapus saham**.")
+        st.subheader("📝 Kelola Saham")
+        st.info("📱 **PENGGUNA HP:** Untuk menghapus saham, **Centang kolom Hapus** pada baris yang diinginkan, lalu klik tombol **Simpan** di bawah.")
 
-        # Tabel Interaktif pengganti Form Input
+        # Data Editor dengan kolom Checkbox eksplisit
         edited_df = st.data_editor(
             st.session_state['portfolio_data'],
             num_rows="dynamic",
             use_container_width=True,
             column_config={
-                "Kode Saham": st.column_config.TextColumn("Kode Saham (cth: BRIS)", required=True),
-                "Harga Beli": st.column_config.NumberColumn("Harga Beli (Rp)", min_value=1, step=1, required=True),
-                "Jumlah Lot": st.column_config.NumberColumn("Jumlah Lot", min_value=1, step=1, required=True)
-            },
-            key="active_editor"
+                "Hapus": st.column_config.CheckboxColumn("Hapus?", default=False),
+                "Kode Saham": st.column_config.TextColumn("Kode", required=True),
+                "Harga Beli": st.column_config.NumberColumn("Harga", min_value=1),
+                "Jumlah Lot": st.column_config.NumberColumn("Lot", min_value=1)
+            }
         )
-        
-        # Simpan perubahan tabel ke memori sesi
-        st.session_state['portfolio_data'] = edited_df
 
-        # Tombol Simpan ke Database Permanen
-        if st.button("💾 Simpan Perubahan ke Database", type="primary"):
+        if st.button("💾 Simpan Perubahan", type="primary", use_container_width=True):
             try:
-                # Bersihkan data lama user ini di Supabase, lalu masukkan yang baru
+                # FILTER: Hanya ambil baris yang "Hapus"-nya TIDAK dicentang
+                to_keep = edited_df[edited_df['Hapus'] == False]
+                
+                # Bersihkan data lama di Supabase
                 supabase.table('user_portfolios').delete().eq('user_id', user_id).execute()
                 
-                if not edited_df.empty:
+                if not to_keep.empty:
                     insert_data = []
-                    for _, row in edited_df.iterrows():
+                    for _, row in to_keep.iterrows():
                         if pd.notna(row['Kode Saham']) and str(row['Kode Saham']).strip() != "":
                             insert_data.append({
                                 "user_id": user_id,
@@ -2003,9 +2002,16 @@ def show_portfolio_advisor():
                             })
                     if insert_data:
                         supabase.table('user_portfolios').insert(insert_data).execute()
-                st.success("✅ Portofolio berhasil disimpan ke server!")
+                
+                # Update memori tanpa kolom hapus untuk refresh berikutnya
+                st.session_state['portfolio_data'] = to_keep
+                
+                st.success("✅ Data berhasil diperbarui!")
+                time.sleep(1)
+                st.rerun()
             except Exception as e:
-                st.error(f"Gagal menyimpan ke database: {e}")
+                st.error(f"Gagal menyimpan: {e}")
+
 
     # ==========================================
     # TAB 2: HISTORI PENJUALAN (REALIZED PnL)
