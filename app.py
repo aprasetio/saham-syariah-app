@@ -1608,6 +1608,46 @@ def show_gold_predictor():
             st.divider()
             st.caption("ℹ️ *Estimasi di atas sudah termasuk biaya cetak rata-rata di Butik Antam. Harga resmi mungkin sedikit berbeda tergantung lokasi butik.*")
 
+            # ... (Kode 3 Metrik Pecahan Anda ada di atas sini) ...
+            st.divider()
+            st.caption("ℹ️ *Estimasi di atas sudah termasuk biaya cetak rata-rata di Butik Antam. Harga resmi mungkin sedikit berbeda tergantung lokasi butik.*")
+
+            # ==========================================
+            # FITUR BARU: KALKULATOR BREAK-EVEN BUYBACK
+            # ==========================================
+            st.subheader("🧮 Kalkulator Break-Even (Balik Modal)")
+            st.markdown("Simulasi berapa tinggi Emas Dunia harus naik agar Anda bisa menjual kembali emas fisik Anda ke Antam tanpa rugi (menutup *Spread Buyback*).")
+
+            # Asumsi rata-rata Spread Buyback Antam adalah 12% di bawah harga jual
+            buyback_spread = 0.12
+
+            c_calc1, c_calc2 = st.columns([1, 2])
+            with c_calc1:
+                pilihan_pecahan = st.selectbox("Simulasikan Pecahan:", ["1 Gram", "2 Gram", "5 Gram"])
+
+            # Mengambil data margin sesuai pilihan dropdown
+            if pilihan_pecahan == "1 Gram":
+                margin_terpilih = 0.0835; ukuran = 1
+            elif pilihan_pecahan == "2 Gram":
+                margin_terpilih = 0.0722; ukuran = 2
+            else:
+                margin_terpilih = 0.0665; ukuran = 5
+
+            # Menghitung Harga Beli dan Harga Buyback saat ini
+            harga_beli = (pure_now * (1 + margin_terpilih)) * ukuran
+            harga_buyback = harga_beli * (1 - buyback_spread)
+            kerugian_awal = harga_beli - harga_buyback
+
+            # Menghitung Target XAU/USD agar bisa Break-Even
+            future_pure_target = harga_beli / ((1 + margin_terpilih) * ukuran * (1 - buyback_spread))
+            target_xau = (future_pure_target / idr_now) * troy_ounce
+            persentase_kenaikan = ((target_xau - gold_now) / gold_now) * 100
+
+            with c_calc2:
+                st.info(f"⚠️ Jika Anda membeli **{pilihan_pecahan}** hari ini, nilai jual kembalinya langsung susut **Rp {int(kerugian_awal):,}** jika dijual detik ini juga (Spread {buyback_spread*100}%).")
+                
+            st.success(f"🎯 **Target Break-Even:** Emas Dunia (XAU/USD) harus naik **+{persentase_kenaikan:.1f}%** menuju level **${target_xau:,.2f} /oz** agar Anda bisa balik modal 100%.")
+            
     # === TAB 2: RADAR DISKON & DETEKSI POLA (VIP ONLY) ===
     with tab2:
         if user_role == 'free':
