@@ -2117,217 +2117,30 @@ def show_portfolio_advisor():
 # ==============================================================================
 # --- FITUR BARU: ADMIN CONTROL PANEL ---
 # ==============================================================================
-def show_admin_panel():
-    st.header("👑 Admin Control Panel")
-    
-    # PROTEKSI GANDA: Pastikan yang masuk benar-benar Admin
-    if not is_admin:
-        st.error("🚨 AKSES DITOLAK: Halaman ini hanya untuk Administrator Sistem.")
-        st.stop()
 
-    st.markdown("Selamat datang, **Super Admin**. Di sini Anda dapat memantau aktivitas pengguna dan mengubah status langganan (*Role*) mereka.")
-
-    tab1, tab2 = st.tabs(["👥 Manajemen Pengguna", "📜 Log Aktivitas (Audit Logs)"])
-
-    # --- TAB 1: MANAJEMEN PENGGUNA ---
-    with tab1:
-        st.subheader("Data Pengguna Terdaftar")
-        
-        try:
-            # Tarik semua data dari tabel profiles
-            res_users = supabase.table('profiles').select('*').execute()
-            df_users = pd.DataFrame(res_users.data)
-            
-            if not df_users.empty:
-                # 1. Metrik Ringkasan
-                total_user = len(df_users)
-                total_vip = len(df_users[df_users['role'] == 'vip'])
-                total_free = len(df_users[df_users['role'] == 'free'])
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Total Pengguna", total_user)
-                c2.metric("Pengguna VIP 👑", total_vip)
-                c3.metric("Pengguna Free", total_free)
-                
-                st.divider()
-
-                # 2. Alat Pengubah Role (Upgrade / Downgrade)
-                st.markdown("#### ⚙️ Ubah Role Pengguna")
-                with st.expander("Klik untuk Upgrade/Downgrade User", expanded=False):
-                    col_email, col_role, col_btn = st.columns([2, 1, 1])
-                    with col_email:
-                        target_email = st.selectbox("Pilih Email Pengguna:", df_users['email'].tolist())
-                    with col_role:
-                        new_role = st.selectbox("Pilih Role Baru:", ["free", "vip", "admin"])
-                    with col_btn:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("Simpan Perubahan", type="primary", use_container_width=True):
-                            target_id = df_users[df_users['email'] == target_email]['id'].values[0]
-                            # Update ke Supabase
-                            supabase.table('profiles').update({'role': new_role}).eq('id', target_id).execute()
-                            
-                            # Catat di Audit Log
-                            try:
-                                supabase.table('audit_logs').insert({
-                                    "user_email": user_email, "action": "ADMIN_CHANGE_ROLE", 
-                                    "details": f"Admin mengubah role {target_email} menjadi {new_role}"
-                                }).execute()
-                            except: pass
-                            
-                            st.success(f"✅ Role {target_email} berhasil diubah menjadi {new_role}!")
-                            time.sleep(1)
-                            st.rerun()
-
-                # 3. Tabel Data Pengguna
-                st.markdown("#### 📋 Daftar Profil Database")
-                # Rapikan tampilan tabel
-                df_display = df_users[['email', 'role', 'created_at']].copy()
-                df_display['created_at'] = pd.to_datetime(df_display['created_at']).dt.strftime('%Y-%m-%d %H:%M')
-                st.dataframe(df_display, use_container_width=True, hide_index=True)
-
-            else:
-                st.info("Belum ada data pengguna di database.")
-        except Exception as e:
-            st.error(f"Gagal memuat data pengguna: {e}")
-
-    # --- TAB 2: AUDIT LOGS (JEJAK AKTIVITAS) ---
-    with tab2:
-        st.subheader("Jejak Aktivitas Sistem")
-        try:
-            # Tarik log 100 aktivitas terakhir
-            res_logs = supabase.table('audit_logs').select('*').order('created_at', desc=True).limit(100).execute()
-            df_logs = pd.DataFrame(res_logs.data)
-            
-            if not df_logs.empty:
-                df_logs['created_at'] = pd.to_datetime(df_logs['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
-                # Tampilkan kolom yang penting saja
-                st.dataframe(df_logs[['created_at', 'user_email', 'action', 'details']], use_container_width=True, hide_index=True)
-            else:
-                st.info("Log aktivitas masih kosong.")
-        except Exception as e:
-            st.warning(f"Gagal menarik Audit Logs (Pastikan tabel audit_logs Anda sudah tersetting). Error: {e}")
 
 # ==============================================================================
-# --- FITUR BARU: ADMIN DASHBOARD (CONTROL PANEL) ---
-# ==============================================================================
-def show_admin_dashboard():
-    st.header("👑 Admin Control Panel")
-    
-    # PROTEKSI GANDA: Pastikan yang masuk benar-benar Admin
-    if not is_admin:
-        st.error("🚨 AKSES DITOLAK: Halaman ini hanya untuk Administrator Sistem.")
-        st.stop()
-
-    st.markdown("Selamat datang, **Super Admin**. Di sini Anda dapat memantau aktivitas pengguna dan mengubah status langganan (*Role*) mereka.")
-
-    tab1, tab2 = st.tabs(["👥 Manajemen Pengguna", "📜 Log Aktivitas (Audit Logs)"])
-
-    # --- TAB 1: MANAJEMEN PENGGUNA ---
-    with tab1:
-        st.subheader("Data Pengguna Terdaftar")
-        
-        try:
-            # Tarik semua data dari tabel profiles
-            res_users = supabase.table('profiles').select('*').execute()
-            df_users = pd.DataFrame(res_users.data)
-            
-            if not df_users.empty:
-                # 1. Metrik Ringkasan
-                total_user = len(df_users)
-                total_vip = len(df_users[df_users['role'] == 'vip'])
-                total_free = len(df_users[df_users['role'] == 'free'])
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Total Pengguna", total_user)
-                c2.metric("Pengguna VIP 👑", total_vip)
-                c3.metric("Pengguna Free", total_free)
-                
-                st.divider()
-
-                # 2. Alat Pengubah Role (Upgrade / Downgrade)
-                st.markdown("#### ⚙️ Ubah Role Pengguna")
-                with st.expander("Klik untuk Upgrade/Downgrade User", expanded=False):
-                    col_email, col_role, col_btn = st.columns([2, 1, 1])
-                    with col_email:
-                        target_email = st.selectbox("Pilih Email Pengguna:", df_users['email'].tolist())
-                    with col_role:
-                        new_role = st.selectbox("Pilih Role Baru:", ["free", "vip", "admin"])
-                    with col_btn:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("Simpan Perubahan", type="primary", use_container_width=True):
-                            target_id = df_users[df_users['email'] == target_email]['id'].values[0]
-                            # Update ke Supabase
-                            supabase.table('profiles').update({'role': new_role}).eq('id', target_id).execute()
-                            
-                            # Catat di Audit Log
-                            try:
-                                supabase.table('audit_logs').insert({
-                                    "user_email": user_email, "action": "ADMIN_CHANGE_ROLE", 
-                                    "details": f"Admin mengubah role {target_email} menjadi {new_role}"
-                                }).execute()
-                            except: pass
-                            
-                            st.success(f"✅ Role {target_email} berhasil diubah menjadi {new_role}!")
-                            time.sleep(1)
-                            st.rerun()
-
-                # 3. Tabel Data Pengguna
-                st.markdown("#### 📋 Daftar Profil Database")
-                df_display = df_users[['email', 'role', 'created_at']].copy()
-                df_display['created_at'] = pd.to_datetime(df_display['created_at']).dt.strftime('%Y-%m-%d %H:%M')
-                st.dataframe(df_display, use_container_width=True, hide_index=True)
-
-            else:
-                st.info("Belum ada data pengguna di database.")
-        except Exception as e:
-            st.error(f"Gagal memuat data pengguna: {e}")
-
-    # --- TAB 2: AUDIT LOGS (JEJAK AKTIVITAS) ---
-    with tab2:
-        st.subheader("Jejak Aktivitas Sistem")
-        try:
-            res_logs = supabase.table('audit_logs').select('*').order('created_at', desc=True).limit(100).execute()
-            df_logs = pd.DataFrame(res_logs.data)
-            
-            if not df_logs.empty:
-                df_logs['created_at'] = pd.to_datetime(df_logs['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
-                st.dataframe(df_logs[['created_at', 'user_email', 'action', 'details']], use_container_width=True, hide_index=True)
-            else:
-                st.info("Log aktivitas masih kosong.")
-        except Exception as e:
-            st.warning(f"Gagal menarik Audit Logs. Error: {e}")
-
-
 # ==============================================================================
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 # ==============================================================================
-# --- 15. ETALASE FREEMIUM & SIDEBAR ---
+
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 # Penyesuaian warna role
-color_map = {"admin": "green", "pro": "blue", "trial": "orange", "free": "gray"}
+color_map = {"admin": "green", "pro": "blue", "trial": "orange", "free": "gray", "vip": "gold"}
 role_color = color_map.get(user_role, "gray")
 st.sidebar.markdown(f"Status Akun: <span style='color:{role_color}; font-weight:bold;'>{user_role.upper()}</span>", unsafe_allow_html=True)
 
+# --- VISUALISASI METERAN KUOTA API ---
 try:
     # Tarik data terbaru untuk Sidebar
     q_res = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).single().execute()
     if q_res.data:
-        limit_q = q_res.data['daily_quota']
-        used_q = q_res.data['used_quota']
-        sisa_q = max(0, limit_q - used_q)
-        
-        # Visual Progress Bar
-        st.sidebar.caption(f"Sisa Kuota API: **{sisa_q} / {limit_q}**")
-        prog_val = min(1.0, used_q / limit_q) if limit_q > 0 else 1.0
-        
-        if sisa_q == 0:
-            st.sidebar.progress(prog_val)
-            st.sidebar.error("🚨 Kuota harian habis.")
-        else:
-            st.sidebar.progress(prog_val)
+        limit_q = int(q_res.data.get('daily_quota', 0))
+        used_q = int(q_res.data.get('used_quota', 0))
+    else:
+        limit_q = 0; used_q = 0
 except:
-    pass
-st.sidebar.divider()
+    limit_q = 0; used_q = 0
 
 if user_role == 'admin':
     st.sidebar.success("⚡ Kuota API: **UNLIMITED**")
@@ -2345,6 +2158,8 @@ else:
     else:
         st.sidebar.info(f"⚡ Sisa Kuota: **{sisa_q} / {limit_q}**")
         st.sidebar.progress(prog_val)
+
+st.sidebar.divider()
 
 # --- INISIALISASI MEMORI SMART BRIDGE ---
 if 'active_menu' not in st.session_state:
@@ -2433,7 +2248,7 @@ if is_admin:
         with col1:
             if st.button("✅ YAKIN", use_container_width=True):
                 st.cache_data.clear()
-                api_registry.clear()
+                # api_registry.clear() # Buka komentar ini jika api_registry sudah didefinisikan sebelumnya
                 st.session_state['confirm_clear_cache'] = False 
                 st.sidebar.success("✅ Memori dibersihkan!")
                 time.sleep(1.5) 
