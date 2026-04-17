@@ -977,93 +977,105 @@ def show_chart(use_idx_data, market_choice):
 # --- 13. FITUR ADMIN DASHBOARD ---
 def show_admin_dashboard():
     st.header("👑 Admin Dashboard & Control Panel")
-    st.markdown("Pusat kendali intelijen dan analitik pengguna. Data ditarik secara *real-time* dari server.")
+    st.markdown("Pusat kendali akun, kuota API, dan analitik pengguna secara *real-time*.")
 
-    # PROTEKSI KEAMANAN GANDA
     if not is_admin:
-        st.error("🚨 AKSES DITOLAK: Halaman ini hanya untuk Administrator Sistem.")
+        st.error("🚨 AKSES DITOLAK")
         st.stop()
 
     st.divider()
 
-    # MENGGABUNGKAN FITUR BARU DENGAN TAB EKSISTING ANDA
+    # Menambah Tab Manajemen Pengguna di awal
     tab1, tab2, tab3 = st.tabs(["👥 Manajemen Pengguna", "📜 Log Persetujuan ToS", "🔍 Log Pencarian Saham"])
 
-    # ==========================================
-    # TAB 1: MANAJEMEN USER (FITUR BARU)
-    # ==========================================
+    # --- TAB 1: MANAJEMEN PENGGUNA & KUOTA ---
     with tab1:
-        st.subheader("Data Pengguna & Status Langganan")
         try:
-            # Tarik data terbaru dari tabel profiles
+            # Tarik data lengkap dari profil
             res_users = supabase.table('profiles').select('*').execute()
             df_users = pd.DataFrame(res_users.data)
 
             if not df_users.empty:
-                # 1. Metrik Ringkasan (Dinamis membaca role: free, pro, trial, dll)
+                # Metrik Ringkasan Dinamis
                 role_counts = df_users['role'].value_counts()
-                
-                st.markdown("##### 📈 Distribusi Pengguna")
                 cols = st.columns(len(role_counts))
                 for i, (role_name, count) in enumerate(role_counts.items()):
                     cols[i].metric(f"Role: {role_name.upper()}", f"{count} User")
 
                 st.divider()
 
-                # 2. Alat Pengubah Role (Upgrade / Downgrade)
-                st.markdown("##### ⚙️ Update Status Langganan")
-                with st.expander("⚙️ Konfigurasi Role & Kuota API User", expanded=True):
-                    # Kita buat 3 kolom agar input kuota bisa masuk
-                    c_email, c_role, c_quota = st.columns([2, 1, 1])
+                # Form Update Akun
+                st.subheader("⚙️ Konfigurasi Akun & Kuota")
+                with st.expander("Klik untuk Edit Role & Batas Kuota User", expanded=True):
+                    c_mail, c_role, c_quota = st.columns([2, 1, 1])
+                    
+                    target_email = c_mail.selectbox("Pilih Email User:", df_users['email'].unique())
+                    u_data = df_users[df_users['email'] == target_email].iloc[0]
+                    
+                    # Mapping Role yang Anda gunakan
+                    roles = ["free", "trial", "pro", "admin"]
+                    idx_role = roles.index(u_data['role']) if u_data['role'] in roles else 0
+                    
+                    new_role = c_role.selectbox("Role Baru:", roles, index=idx_role)
+                    new_q = c_quota.number_input("Batas Kuota Harian:", min_value=0, value=int(u_data.get('daily_quota', 0)))
 
-                    target_email = c_email.selectbox("Pilih Email Pengguna:", df_users['email'].unique())
-                    current_user_data = df_users[df_users['email'] == target_email].iloc[0]
-
-                    role_list = ["free", "trial", "pro", "admin"]
-                    current_idx = role_list.index(current_user_data['role']) if current_user_data['role'] in role_list else 0
-
-                    new_role = c_role.selectbox("Ubah Ke Role:", role_list, index=current_idx)
-
-                    # INPUT BARU: Bebas tentukan kuota harian untuk user ini
-                    current_quota_val = int(current_user_data.get('daily_quota', 0))
-                    new_quota = c_quota.number_input("Limit Kuota Harian:", min_value=0, value=current_quota_val)
-
-                    if st.button("💾 Simpan Perubahan Akun", type="primary", use_container_width=True):
-                        # Update Role sekaligus Limit Kuota ke Database
+                    if st.button("💾 Simpan Perubahan", type="primary", use_container_width=True):
                         supabase.table('profiles').update({
                             'role': new_role,
-                            'daily_quota': new_quota
-                        }).eq('id', current_user_data['id']).execute()
-
-                        # Catat ke Audit Log
-                        try:
-                            supabase.table('audit_logs').insert({
-                                "user_email": user_email, "action": "ADMIN_UPDATE_ACCOUNT", 
-                                "details": f"Admin mengubah {target_email} -> Role: {new_role}, Kuota: {new_quota}"
-                            }).execute()
-                        except: pass
-
-                        st.success(f"Berhasil! {target_email} diperbarui (Role: {new_role.upper()}, Kuota: {new_quota})")
-                        time.sleep(1.5)
+                            'daily_quota': new_q
+                        }).eq('id', u_data['id']).execute()
+                        
+                        st.success(f"✅ Akun {target_email} berhasil diperbarui!")
+                        time.sleep(1)
                         st.rerun()
 
-                # 3. Tabel Data Pengguna (Dengan Proteksi Kolom missing_index)
-                st.markdown("##### 📋 Daftar Profil Database")
-                cols_to_show = ['email', 'role']
-                if 'created_at' in df_users.columns:
-                    cols_to_show.append('created_at')
+                st.divider()
+
+                # Tabel Daftar Profil (Menampilkan Kuota & Sisa)
+                st.subheader("📋 Daftar Profil Database")
                 
-                df_final = df_users[cols_to_show].copy()
+                # Menghitung Sisa Kuota untuk ditampilkan di tabel
+                df_view = df_users.copy()
+                df_view['Sisa Kuota'] = df_view['daily_quota'] - df_view['used_quota']
                 
-                if 'created_at' in df_final.columns:
-                    df_final['created_at'] = pd.to_datetime(df_final['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+                # Memilih kolom yang ingin ditampilkan (Proteksi agar tidak error jika kolom absen)
+                cols_display = ['email', 'role', 'daily_quota', 'used_quota', 'Sisa Kuota']
+                if 'created_at' in df_view.columns:
+                    cols_display.append('created_at')
+                
+                # Filter hanya kolom yang ada
+                existing_cols = [c for c in cols_display if c in df_view.columns]
+                df_final = df_view[existing_cols]
                 
                 st.dataframe(df_final, use_container_width=True, hide_index=True)
 
             else:
-                st.info("Belum ada data pengguna di database.")
+                st.info("Tidak ada data pengguna.")
         except Exception as e:
-            st.error(f"Gagal memuat data pengguna: {e}")
+            st.error(f"Gagal memuat manajemen pengguna: {e}")
+
+    # --- TAB 2 & 3: LOG EKSISTING ANDA ---
+    with tab2:
+        if st.button("Muat Data Persetujuan ToS", type="primary", key="btn_tos"):
+            try:
+                res = supabase.table('audit_logs').select('*').eq('action', 'LOGIN_TOS_ACCEPTED').order('created_at', desc=True).limit(100).execute()
+                if res.data:
+                    df = pd.DataFrame(res.data)
+                    df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
+                    st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
+                else: st.info("Belum ada data.")
+            except: st.error("Gagal menarik data log.")
+
+    with tab3:
+        if st.button("Muat Data Pencarian Saham", type="primary", key="btn_search"):
+            try:
+                res = supabase.table('audit_logs').select('*').eq('action', 'SEARCH_CHART').order('created_at', desc=True).limit(100).execute()
+                if res.data:
+                    df = pd.DataFrame(res.data)
+                    df['Waktu (UTC)'] = df['created_at'].str.slice(0, 19).str.replace('T', ' ')
+                    st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
+                else: st.info("Belum ada data.")
+            except: st.error("Gagal menarik data log.")
 
     # ==========================================
     # TAB 2 & 3: KODE EKSISTING ANDA
@@ -2289,17 +2301,33 @@ def show_admin_dashboard():
 # ==============================================================================
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 # ==============================================================================
+# --- 15. ETALASE FREEMIUM & SIDEBAR ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
-role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
+# Penyesuaian warna role
+color_map = {"admin": "green", "pro": "blue", "trial": "orange", "free": "gray"}
+role_color = color_map.get(user_role, "gray")
 st.sidebar.markdown(f"Status Akun: <span style='color:{role_color}; font-weight:bold;'>{user_role.upper()}</span>", unsafe_allow_html=True)
 
-# --- VISUALISASI METERAN KUOTA API ---
 try:
-    current_db = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).single().execute().data
-    limit_q = current_db.get('daily_quota', 0)
-    used_q = current_db.get('used_quota', 0)
+    # Tarik data terbaru untuk Sidebar
+    q_res = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).single().execute()
+    if q_res.data:
+        limit_q = q_res.data['daily_quota']
+        used_q = q_res.data['used_quota']
+        sisa_q = max(0, limit_q - used_q)
+        
+        # Visual Progress Bar
+        st.sidebar.caption(f"Sisa Kuota API: **{sisa_q} / {limit_q}**")
+        prog_val = min(1.0, used_q / limit_q) if limit_q > 0 else 1.0
+        
+        if sisa_q == 0:
+            st.sidebar.progress(prog_val)
+            st.sidebar.error("🚨 Kuota harian habis.")
+        else:
+            st.sidebar.progress(prog_val)
 except:
-    limit_q = 0; used_q = 0
+    pass
+st.sidebar.divider()
 
 if user_role == 'admin':
     st.sidebar.success("⚡ Kuota API: **UNLIMITED**")
