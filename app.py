@@ -182,8 +182,13 @@ def login_ui():
                         except: pass
                         st.rerun()
                     else: st.error("Profil tidak ditemukan di database!")
+                # ... kode try Anda sebelumnya ...
                 except Exception as e:
-                    st.error("🚫 Email tidak terdaftar atau Password salah!")
+                    # Tampilkan error UI untuk user
+                    st.error("🚫 Gagal Login. Silakan cek detail teknis di bawah.")
+                    
+                    # TAMPILKAN ERROR MENTAH DARI SUPABASE (KHUSUS DEBUGGING)
+                    st.warning(f"🔍 Detail Error Sistem: {str(e)}")
 
 if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
     login_ui()
