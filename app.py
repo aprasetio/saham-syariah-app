@@ -1933,7 +1933,8 @@ def show_portfolio_advisor():
 
         table_rows.append({
             "Saham": sym, "Lot": lot, "Avg Price": f"Rp {avg_p:,.0f}", 
-            "Last Price": f"Rp {curr_p:,.0f}", "PnL (%)": pnl_pct, "Aksi AI": rekomendasi
+            "Last Price": f"Rp {curr_p:,.0f}", "PnL (%)": pnl_pct, "Aksi AI": rekomendasi,
+            "Valuasi": valuasi # Tambahan data valuasi untuk Pie Chart
         })
 
     total_pnl_rp = total_valuasi - total_modal
@@ -1947,14 +1948,49 @@ def show_portfolio_advisor():
     c_dash2.metric("Floating PnL", f"Rp {total_pnl_rp:,.0f}", f"{total_pnl_pct:.2f}%", delta_color="normal" if total_pnl_rp >=0 else "inverse")
     c_dash3.metric("Skor Kesehatan", f"{health_score:.0f} / 100", "Sehat" if health_score >= 60 else "Perlu Perbaikan", delta_color="normal" if health_score >= 60 else "inverse")
 
-    st.subheader("📋 Detail Aset & Rekomendasi AI")
+    # ==========================================
+    # VISUALISASI ALOKASI & RISIKO
+    # ==========================================
+    st.divider()
     df_display = pd.DataFrame(table_rows)
     
+    c_chart1, c_chart2 = st.columns(2)
+    with c_chart1:
+        st.subheader("🥧 Alokasi Aset")
+        # Membuat Donut Chart
+        fig_pie = go.Figure(data=[go.Pie(labels=df_display['Saham'], values=df_display['Valuasi'], hole=.4)])
+        fig_pie.update_layout(height=300, template="plotly_dark", margin=dict(l=0, r=0, t=10, b=0), showlegend=True)
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with c_chart2:
+        st.subheader("🛡️ Radar Diversifikasi")
+        if user_role == 'free':
+            st.warning("🔒 **Fitur Eksklusif VIP Terkunci**")
+            st.info("Ketahui apakah portofolio Anda memiliki risiko fatal karena terlalu menumpuk di satu keranjang. Jika pasar anjlok, apakah aset Anda aman?")
+            st.button("Upgrade VIP Sekarang 🚀", key="div_upgrade")
+        else:
+            # Logika AI Sederhana untuk Diversifikasi
+            max_weight = (df_display['Valuasi'].max() / total_valuasi) * 100 if total_valuasi > 0 else 0
+            biggest_stock = df_display.loc[df_display['Valuasi'].idxmax(), 'Saham'] if total_valuasi > 0 else "N/A"
+            
+            if len(df_display) < 2:
+                st.warning(f"⚠️ **Portofolio Terlalu Sepi.** 100% dana Anda ada di **{biggest_stock}**. Sangat rawan jika saham ini tiba-tiba anjlok (All-in). Minimal miliki 3 saham berbeda.")
+            elif max_weight > 50:
+                st.error(f"🚨 **Risiko Tinggi!** {max_weight:.1f}% dana Anda menumpuk di saham **{biggest_stock}**. Jika saham ini turun, seluruh portofolio Anda akan ikut terseret tajam. Lakukan *rebalancing*.")
+            else:
+                st.success("✅ **Diversifikasi Sangat Sehat.** Tidak ada saham yang mendominasi lebih dari 50%. Jika salah satu saham anjlok, portofolio Anda akan tetap bertahan (Resilien).")
+
+    # 5. TABEL DETAIL PORTOFOLIO
+    st.subheader("📋 Detail Aset & Rekomendasi AI")
+    
+    # Membuang kolom 'Valuasi' agar tabel tidak berantakan (hanya butuh untuk Pie Chart)
+    df_table_view = df_display.drop(columns=['Valuasi']) if 'Valuasi' in df_display.columns else df_display
+
     # --- GEMBOK VIP MENGGUNAKAN GLOBAL user_role ---
     if user_role == 'free':
-        df_display['Aksi AI'] = "🔒 Akses VIP"
+        df_table_view['Aksi AI'] = "🔒 Akses VIP"
         st.dataframe(
-            df_display.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
+            df_table_view.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
             use_container_width=True, hide_index=True
         )
         st.info("🔒 **Buka Kunci Rekomendasi AI (VIP):** Biarkan AI kami yang berpikir kapan harus *Cut Loss* atau *Average Down*.")
@@ -1962,7 +1998,7 @@ def show_portfolio_advisor():
     else:
         st.success("💎 **VIP AI Active:** Sistem memantau portofolio Anda secara real-time.")
         st.dataframe(
-            df_display.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
+            df_table_view.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
             use_container_width=True, hide_index=True
         )
         
@@ -1974,7 +2010,6 @@ def show_portfolio_advisor():
                 st.success(f"{del_sym} dihapus.")
                 time.sleep(1)
                 st.rerun()
-
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
