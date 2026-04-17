@@ -1821,7 +1821,169 @@ def show_gold_predictor():
 
 
 
+# ==============================================================================
+# --- 14.9 FITUR BARU: ROBO-ADVISOR PORTOFOLIO ---
+# ==============================================================================
 
+@st.cache_data(ttl=60, show_spinner=False)
+def get_current_prices(symbols):
+    """Mengambil harga saham real-time secara massal (batch) agar cepat."""
+    if not symbols: return {}
+    
+    # Format ke .JK jika belum ada (asumsi saham Indonesia)
+    formatted_syms = [s if s.endswith(".JK") else f"{s}.JK" for s in symbols]
+    
+    try:
+        # Gunakan auto_adjust=False agar kompatibel dengan yfinance versi terbaru
+        data = yf.download(formatted_syms, period="1d", progress=False)
+        
+        # Mengatasi format MultiIndex yfinance jika saham > 1
+        if isinstance(data.columns, pd.MultiIndex):
+            close_data = data['Close']
+        else:
+            close_data = pd.DataFrame(data['Close'], columns=[formatted_syms[0]])
+
+        prices = {}
+        for orig, fmt in zip(symbols, formatted_syms):
+            if fmt in close_data.columns and not pd.isna(close_data[fmt].iloc[-1]):
+                prices[orig] = float(close_data[fmt].iloc[-1])
+        return prices
+    except Exception as e:
+        print(f"Error fetching prices: {e}")
+        return {}
+
+def show_portfolio_advisor():
+    st.header("💼 Robo-Advisor Portofolio")
+    st.markdown("Asisten AI yang memantau kesehatan aset Anda dan memberikan rekomendasi *Take Profit*, *Cut Loss*, atau *Average Down*.")
+
+    # 1. CEK LOGIN (Sesuaikan dengan sistem otentikasi Anda)
+    # Jika menggunakan session_state.user_id, gunakan baris di bawah:
+    user_id = st.session_state.get('user_id') 
+    
+    # Fallback: Jika sistem belum ada login, kita gunakan ID Dummy sementara untuk uji coba
+    if not user_id:
+        st.warning("⚠️ **Mode Simulasi Aktif.** Untuk menyimpan data secara permanen, fitur Login harus diaktifkan kelak.")
+        user_id = "00000000-0000-0000-0000-000000000000" # Dummy UUID
+        # return # Hapus tanda pagar di awal baris ini nanti jika sistem Login Anda sudah jalan
+
+    # 2. FORM INPUT SAHAM (Tambah / Edit)
+    with st.expander("➕ Tambah / Edit Saham", expanded=True):
+        with st.form("add_porto_form", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            with c1: input_sym = st.text_input("Kode Saham (cth: BBCA)").upper()
+            with c2: input_price = st.number_input("Harga Beli Rata-rata (Rp)", min_value=1.0, step=50.0)
+            with c3: input_lot = st.number_input("Jumlah Lot", min_value=1, step=1)
+            
+            submit_porto = st.form_submit_button("💾 Simpan ke Portofolio", use_container_width=True)
+
+            if submit_porto and input_sym:
+                clean_sym = input_sym.replace(".JK", "")
+                try:
+                    # Cek apakah saham sudah ada di portofolio user
+                    existing = supabase.table('user_portfolios').select('id').eq('user_id', user_id).eq('symbol', clean_sym).execute()
+                    
+                    if existing.data:
+                        # UPDATE jika sudah ada (Average/Jual sebagian)
+                        supabase.table('user_portfolios').update({
+                            'avg_price': float(input_price), 'total_lot': int(input_lot)
+                        }).eq('id', existing.data[0]['id']).execute()
+                    else:
+                        # INSERT jika belum ada
+                        supabase.table('user_portfolios').insert({
+                            'user_id': user_id, 'symbol': clean_sym, 'avg_price': float(input_price), 'total_lot': int(input_lot)
+                        }).execute()
+                    
+                    st.success(f"✅ Saham {clean_sym} berhasil disimpan!")
+                    time.sleep(1)
+                    st.rerun() # Refresh agar data baru muncul
+                except Exception as e:
+                    st.error(f"Gagal menyimpan data ke database. Cek koneksi Supabase Anda: {e}")
+
+    # 3. TARIK DATA DARI DATABASE
+    try:
+        res = supabase.table('user_portfolios').select('*').eq('user_id', user_id).execute()
+        porto_data = res.data
+    except:
+        st.error("Gagal menarik data dari Supabase.")
+        return
+
+    if not porto_data:
+        st.info("💡 Portofolio Anda masih kosong. Silakan tambah saham di formulir atas.")
+        return
+
+    # 4. PROSES & HITUNG FLOATING PnL
+    df_porto = pd.DataFrame(porto_data)
+    symbols = df_porto['symbol'].tolist()
+    
+    with st.spinner("Menarik harga pasar real-time..."):
+        current_prices = get_current_prices(symbols)
+
+    total_modal = 0; total_valuasi = 0
+    table_rows = []
+
+    for _, row in df_porto.iterrows():
+        sym = row['symbol']; avg_p = float(row['avg_price']); lot = int(row['total_lot'])
+        lembar = lot * 100
+        
+        modal = avg_p * lembar
+        curr_p = current_prices.get(sym, avg_p) # Fallback ke harga beli jika gagal narik data
+        valuasi = curr_p * lembar
+        
+        pnl_rp = valuasi - modal
+        pnl_pct = (pnl_rp / modal) * 100 if modal > 0 else 0
+        
+        total_modal += modal; total_valuasi += valuasi
+
+        # --- AI LOGIC (Actionable Insights) ---
+        if pnl_pct <= -15: rekomendasi = "🚨 Urgensi Cut Loss"
+        elif pnl_pct <= -5: rekomendasi = "💎 Cari Peluang Avg Down"
+        elif pnl_pct >= 15: rekomendasi = "💰 Take Profit Parsial"
+        elif pnl_pct >= 5: rekomendasi = "📈 Tren Positif (Hold)"
+        else: rekomendasi = "⏳ Konsolidasi (Hold)"
+
+        table_rows.append({
+            "Saham": sym, "Lot": lot, "Avg Price": f"Rp {avg_p:,.0f}", 
+            "Last Price": f"Rp {curr_p:,.0f}", "PnL (%)": pnl_pct, "Aksi AI": rekomendasi
+        })
+
+    total_pnl_rp = total_valuasi - total_modal
+    total_pnl_pct = (total_pnl_rp / total_modal) * 100 if total_modal > 0 else 0
+    health_score = max(0, min(100, 60 + (total_pnl_pct * 2)))
+
+    # 5. DASHBOARD METRIK UTAMA
+    st.divider()
+    c_dash1, c_dash2, c_dash3 = st.columns(3)
+    c_dash1.metric("Total Aset", f"Rp {total_valuasi:,.0f}")
+    c_dash2.metric("Floating PnL", f"Rp {total_pnl_rp:,.0f}", f"{total_pnl_pct:.2f}%", delta_color="normal" if total_pnl_rp >=0 else "inverse")
+    c_dash3.metric("Skor Kesehatan", f"{health_score:.0f} / 100", "Sehat" if health_score >= 60 else "Perlu Perbaikan", delta_color="normal" if health_score >= 60 else "inverse")
+
+    st.subheader("📋 Detail Aset & Rekomendasi AI")
+    df_display = pd.DataFrame(table_rows)
+    
+    # --- GEMBOK VIP ---
+    if user_role == 'free':
+        df_display['Aksi AI'] = "🔒 Akses VIP"
+        st.dataframe(
+            df_display.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
+            use_container_width=True, hide_index=True
+        )
+        st.info("🔒 **Buka Kunci Rekomendasi AI (VIP):** Biarkan AI kami yang berpikir. Dapatkan instruksi matematis apakah saham yang sedang *nyangkut* harus di *Cut Loss* atau justru di *Average Down* (Beli Lagi) berdasarkan data historis.")
+        st.button("Upgrade VIP Sekarang 🚀", key="robo_upgrade")
+    else:
+        st.success("💎 **VIP AI Active:** Sistem memantau portofolio Anda secara real-time.")
+        st.dataframe(
+            df_display.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
+            use_container_width=True, hide_index=True
+        )
+        
+        # Fitur Hapus Saham
+        with st.expander("🗑️ Hapus Saham dari Portofolio"):
+            del_sym = st.selectbox("Pilih Saham yang sudah Anda jual (Clear Position):", df_porto['symbol'].tolist())
+            if st.button("Hapus Saham", type="primary"):
+                supabase.table('user_portfolios').delete().eq('user_id', user_id).eq('symbol', del_sym).execute()
+                st.success(f"{del_sym} dihapus dari pantauan.")
+                time.sleep(1)
+                st.rerun()
 
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
@@ -1847,7 +2009,8 @@ menu_options = [
     "🥇 Emas & Safe Haven",
     "🧪 Mesin Backtesting", 
     "📰 Radar Sentimen Berita", 
-    "🗓️ Peta Musiman", 
+    "🗓️ Peta Musiman",
+    "💼 Robo-Advisor Portofolio",
     "📅 Dividend Hunter", 
     "📚 Pusat Edukasi"
 ]
@@ -1970,6 +2133,9 @@ elif mode == "📰 Radar Sentimen Berita":
 
 elif mode == "🗓️ Peta Musiman":
     show_seasonality(market_choice)
+
+elif mode == "💼 Robo-Advisor Portofolio":
+    show_portfolio_advisor()
 
 elif mode == "📅 Dividend Hunter":
     show_dividend_hunter(active_stock_list, active_category_name, market_choice)
