@@ -1938,167 +1938,227 @@ def get_current_prices(symbols):
         return {}
 
 def show_portfolio_advisor():
-    st.header("💼 Robo-Advisor Portofolio")
-    st.markdown("Asisten AI yang memantau kesehatan aset Anda dan memberikan rekomendasi *Take Profit*, *Cut Loss*, atau *Average Down*.")
-
-    # 1. FORM INPUT SAHAM (Tambah / Edit)
-    with st.expander("➕ Tambah / Edit Saham", expanded=True):
-        with st.form("add_porto_form", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            with c1: input_sym = st.text_input("Kode Saham (cth: ADRO)").upper()
-            with c2: input_price = st.number_input("Harga Beli Rata-rata (Rp)", min_value=1.0, step=50.0)
-            with c3: input_lot = st.number_input("Jumlah Lot", min_value=1, step=1)
-            
-            submit_porto = st.form_submit_button("💾 Simpan ke Portofolio", use_container_width=True)
-
-            if submit_porto and input_sym:
-                clean_sym = input_sym.replace(".JK", "")
-                try:
-                    # Menggunakan variabel user_id global dari sistem login Anda
-                    existing = supabase.table('user_portfolios').select('id').eq('user_id', user_id).eq('symbol', clean_sym).execute()
-                    
-                    if existing.data:
-                        # UPDATE
-                        supabase.table('user_portfolios').update({
-                            'avg_price': float(input_price), 'total_lot': int(input_lot)
-                        }).eq('id', existing.data[0]['id']).execute()
-                    else:
-                        # INSERT
-                        supabase.table('user_portfolios').insert({
-                            'user_id': user_id, 'symbol': clean_sym, 'avg_price': float(input_price), 'total_lot': int(input_lot)
-                        }).execute()
-                    
-                    st.success(f"✅ Saham {clean_sym} berhasil disimpan!")
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal menyimpan data ke database: {e}")
-
-    # 2. TARIK DATA DARI DATABASE
-    try:
-        res = supabase.table('user_portfolios').select('*').eq('user_id', user_id).execute()
-        porto_data = res.data
-    except:
-        st.error("Gagal menarik data dari Supabase.")
-        return
-
-    if not porto_data:
-        st.info("💡 Portofolio Anda masih kosong. Silakan tambah saham di formulir atas.")
-        return
-
-    # 3. PROSES & HITUNG FLOATING PnL
-    df_porto = pd.DataFrame(porto_data)
-    symbols = df_porto['symbol'].tolist()
-    
-    with st.spinner("Menarik harga pasar real-time..."):
-        current_prices = get_current_prices(symbols)
-
-    total_modal = 0; total_valuasi = 0
-    table_rows = []
-
-    for _, row in df_porto.iterrows():
-        sym = row['symbol']; avg_p = float(row['avg_price']); lot = int(row['total_lot'])
-        lembar = lot * 100
-        
-        modal = avg_p * lembar
-        curr_p = current_prices.get(sym, avg_p)
-        valuasi = curr_p * lembar
-        
-        pnl_rp = valuasi - modal
-        pnl_pct = (pnl_rp / modal) * 100 if modal > 0 else 0
-        
-        total_modal += modal; total_valuasi += valuasi
-
-        # --- AI LOGIC (Actionable Insights) ---
-        if pnl_pct <= -15: rekomendasi = "🚨 Urgensi Cut Loss"
-        elif pnl_pct <= -5: rekomendasi = "💎 Cari Peluang Avg Down"
-        elif pnl_pct >= 15: rekomendasi = "💰 Take Profit Parsial"
-        elif pnl_pct >= 5: rekomendasi = "📈 Tren Positif (Hold)"
-        else: rekomendasi = "⏳ Konsolidasi (Hold)"
-
-        table_rows.append({
-            "Saham": sym, "Lot": lot, "Avg Price": f"Rp {avg_p:,.0f}", 
-            "Last Price": f"Rp {curr_p:,.0f}", "PnL (%)": pnl_pct, "Aksi AI": rekomendasi,
-            "Valuasi": valuasi # Tambahan data valuasi untuk Pie Chart
-        })
-
-    total_pnl_rp = total_valuasi - total_modal
-    total_pnl_pct = (total_pnl_rp / total_modal) * 100 if total_modal > 0 else 0
-    health_score = max(0, min(100, 60 + (total_pnl_pct * 2)))
-
-    # 4. DASHBOARD METRIK UTAMA
+    st.header("💼 Robo-Advisor & Portfolio Manager")
+    st.markdown("Asisten AI untuk menganalisis kesehatan, alokasi portofolio, dan rekapitulasi PnL Anda.")
     st.divider()
-    c_dash1, c_dash2, c_dash3 = st.columns(3)
-    c_dash1.metric("Total Aset", f"Rp {total_valuasi:,.0f}")
-    c_dash2.metric("Floating PnL", f"Rp {total_pnl_rp:,.0f}", f"{total_pnl_pct:.2f}%", delta_color="normal" if total_pnl_rp >=0 else "inverse")
-    c_dash3.metric("Skor Kesehatan", f"{health_score:.0f} / 100", "Sehat" if health_score >= 60 else "Perlu Perbaikan", delta_color="normal" if health_score >= 60 else "inverse")
 
-    # ==========================================
-    # VISUALISASI ALOKASI & RISIKO
-    # ==========================================
-    st.divider()
-    df_display = pd.DataFrame(table_rows)
-    
-    c_chart1, c_chart2 = st.columns(2)
-    with c_chart1:
-        st.subheader("🥧 Alokasi Aset")
-        # Membuat Donut Chart
-        fig_pie = go.Figure(data=[go.Pie(labels=df_display['Saham'], values=df_display['Valuasi'], hole=.4)])
-        fig_pie.update_layout(height=300, template="plotly_dark", margin=dict(l=0, r=0, t=10, b=0), showlegend=True)
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    with c_chart2:
-        st.subheader("🛡️ Radar Diversifikasi")
-        if user_role == 'free':
-            st.warning("🔒 **Fitur Eksklusif VIP Terkunci**")
-            st.info("Ketahui apakah portofolio Anda memiliki risiko fatal karena terlalu menumpuk di satu keranjang. Jika pasar anjlok, apakah aset Anda aman?")
-            st.button("Upgrade VIP Sekarang 🚀", key="div_upgrade")
-        else:
-            # Logika AI Sederhana untuk Diversifikasi
-            max_weight = (df_display['Valuasi'].max() / total_valuasi) * 100 if total_valuasi > 0 else 0
-            biggest_stock = df_display.loc[df_display['Valuasi'].idxmax(), 'Saham'] if total_valuasi > 0 else "N/A"
-            
-            if len(df_display) < 2:
-                st.warning(f"⚠️ **Portofolio Terlalu Sepi.** 100% dana Anda ada di **{biggest_stock}**. Sangat rawan jika saham ini tiba-tiba anjlok (All-in). Minimal miliki 3 saham berbeda.")
-            elif max_weight > 50:
-                st.error(f"🚨 **Risiko Tinggi!** {max_weight:.1f}% dana Anda menumpuk di saham **{biggest_stock}**. Jika saham ini turun, seluruh portofolio Anda akan ikut terseret tajam. Lakukan *rebalancing*.")
+    # --- 1. SINKRONISASI DATABASE KE MEMORI ---
+    # Tarik data dari Supabase saat pertama kali memuat agar portofolio tidak hilang
+    if 'portfolio_data' not in st.session_state:
+        try:
+            res = supabase.table('user_portfolios').select('*').eq('user_id', user_id).execute()
+            if res.data:
+                df_db = pd.DataFrame(res.data)
+                st.session_state['portfolio_data'] = pd.DataFrame({
+                    "Kode Saham": df_db['symbol'],
+                    "Harga Beli": df_db['avg_price'].astype(int),
+                    "Jumlah Lot": df_db['total_lot'].astype(int)
+                })
             else:
-                st.success("✅ **Diversifikasi Sangat Sehat.** Tidak ada saham yang mendominasi lebih dari 50%. Jika salah satu saham anjlok, portofolio Anda akan tetap bertahan (Resilien).")
+                st.session_state['portfolio_data'] = pd.DataFrame(columns=["Kode Saham", "Harga Beli", "Jumlah Lot"])
+        except:
+            st.session_state['portfolio_data'] = pd.DataFrame(columns=["Kode Saham", "Harga Beli", "Jumlah Lot"])
 
-    # 5. TABEL DETAIL PORTOFOLIO
-    st.subheader("📋 Detail Aset & Rekomendasi AI")
-    
-    # Membuang kolom 'Valuasi' agar tabel tidak berantakan (hanya butuh untuk Pie Chart)
-    df_table_view = df_display.drop(columns=['Valuasi']) if 'Valuasi' in df_display.columns else df_display
+    # --- PEMBUATAN 3 TAB UTAMA ---
+    tab1, tab2, tab3 = st.tabs(["📈 Portofolio Aktif", "💰 Histori Penjualan (PnL)", "🛡️ Analisis & Dividen"])
 
-    # --- GEMBOK VIP MENGGUNAKAN GLOBAL user_role ---
-    if user_role == 'free':
-        df_table_view['Aksi AI'] = "🔒 Akses VIP"
-        st.dataframe(
-            df_table_view.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
-            use_container_width=True, hide_index=True
-        )
-        st.info("🔒 **Buka Kunci Rekomendasi AI (VIP):** Biarkan AI kami yang berpikir kapan harus *Cut Loss* atau *Average Down*.")
-        st.button("Upgrade VIP Sekarang 🚀", key="robo_upgrade")
-    else:
-        st.success("💎 **VIP AI Active:** Sistem memantau portofolio Anda secara real-time.")
-        st.dataframe(
-            df_table_view.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
-            use_container_width=True, hide_index=True
+    # ==========================================
+    # TAB 1: PORTOFOLIO AKTIF (DATA EDITOR)
+    # ==========================================
+    with tab1:
+        st.subheader("📝 Kelola Saham Aktif")
+        st.info("💡 **TIPS INTERAKTIF:** Klik sel pada tabel di bawah untuk **mengubah angka (Edit)**. Ketik di baris paling bawah yang berlogo '+' untuk **menambah saham baru**. Klik kotak di paling kiri lalu tekan 'Delete' di keyboard untuk **menghapus saham**.")
+
+        # Tabel Interaktif pengganti Form Input
+        edited_df = st.data_editor(
+            st.session_state['portfolio_data'],
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Kode Saham": st.column_config.TextColumn("Kode Saham (cth: BRIS)", required=True),
+                "Harga Beli": st.column_config.NumberColumn("Harga Beli (Rp)", min_value=1, step=1, required=True),
+                "Jumlah Lot": st.column_config.NumberColumn("Jumlah Lot", min_value=1, step=1, required=True)
+            },
+            key="active_editor"
         )
         
-        # Fitur Hapus Saham
-        with st.expander("🗑️ Hapus Saham dari Portofolio"):
-            del_sym = st.selectbox("Pilih Saham yang sudah Anda jual (Clear Position):", df_porto['symbol'].tolist())
-            if st.button("Hapus Saham", type="primary"):
-                supabase.table('user_portfolios').delete().eq('user_id', user_id).eq('symbol', del_sym).execute()
-                st.success(f"{del_sym} dihapus.")
-                time.sleep(1)
-                st.rerun()
+        # Simpan perubahan tabel ke memori sesi
+        st.session_state['portfolio_data'] = edited_df
 
-# ==============================================================================
-# --- FITUR BARU: ADMIN CONTROL PANEL ---
-# ==============================================================================
+        # Tombol Simpan ke Database Permanen
+        if st.button("💾 Simpan Perubahan ke Database", type="primary"):
+            try:
+                # Bersihkan data lama user ini di Supabase, lalu masukkan yang baru
+                supabase.table('user_portfolios').delete().eq('user_id', user_id).execute()
+                
+                if not edited_df.empty:
+                    insert_data = []
+                    for _, row in edited_df.iterrows():
+                        if pd.notna(row['Kode Saham']) and str(row['Kode Saham']).strip() != "":
+                            insert_data.append({
+                                "user_id": user_id,
+                                "symbol": str(row['Kode Saham']).upper(),
+                                "avg_price": float(row['Harga Beli']),
+                                "total_lot": int(row['Jumlah Lot'])
+                            })
+                    if insert_data:
+                        supabase.table('user_portfolios').insert(insert_data).execute()
+                st.success("✅ Portofolio berhasil disimpan ke server!")
+            except Exception as e:
+                st.error(f"Gagal menyimpan ke database: {e}")
+
+    # ==========================================
+    # TAB 2: HISTORI PENJUALAN (REALIZED PnL)
+    # ==========================================
+    with tab2:
+        st.subheader("🛒 Form Penjualan Saham")
+        if 'sold_history' not in st.session_state:
+            st.session_state['sold_history'] = pd.DataFrame(columns=["Kode Saham", "Harga Beli", "Harga Jual", "Lot", "PnL Bersih (%)"])
+
+        with st.expander("Catat Transaksi Penjualan Baru", expanded=True):
+            c1, c2, c3, c4 = st.columns(4)
+            s_ticker = c1.text_input("Kode Saham", placeholder="cth: ADRO").upper()
+            s_buy = c2.number_input("Harga Beli (Rp)", min_value=0)
+            s_sell = c3.number_input("Harga Jual (Rp)", min_value=0)
+            s_lot = c4.number_input("Jumlah Lot", min_value=1)
+            
+            if st.button("Simpan Transaksi Jual"):
+                if s_ticker and s_buy > 0 and s_sell > 0:
+                    modal = s_buy * s_lot * 100
+                    hasil_jual = s_sell * s_lot * 100
+                    pnl_nominal = hasil_jual - modal
+                    pnl_persen = (pnl_nominal / modal) * 100 if modal > 0 else 0
+                    
+                    new_sale = pd.DataFrame([[s_ticker, s_buy, s_sell, s_lot, f"{pnl_persen:.2f}%"]], 
+                                            columns=["Kode Saham", "Harga Beli", "Harga Jual", "Lot", "PnL Bersih (%)"])
+                    st.session_state['sold_history'] = pd.concat([st.session_state['sold_history'], new_sale], ignore_index=True)
+                    st.success(f"Transaksi {s_ticker} dicatat! Keuntungan/Kerugian: {pnl_persen:.2f}%")
+                else:
+                    st.error("Mohon isi data harga dengan benar.")
+
+        st.dataframe(st.session_state['sold_history'], use_container_width=True, hide_index=True)
+
+    # ==========================================
+    # TAB 3: ANALISIS AI, DIVIDEN, & KESEHATAN
+    # ==========================================
+    with tab3:
+        if edited_df.empty:
+            st.info("💡 Portofolio Anda masih kosong. Silakan tambah saham di Tab 'Portofolio Aktif' terlebih dahulu.")
+            return
+
+        if st.button("🤖 Jalankan Analisis & Radar Dividen", type="primary"):
+            # Membersihkan list kode saham dari baris kosong
+            symbols = [str(x).upper() for x in edited_df['Kode Saham'].dropna().unique() if str(x).strip() != ""]
+            
+            with st.spinner("Menarik harga pasar real-time & memindai jadwal dividen..."):
+                current_prices = get_current_prices(symbols)
+                
+                # --- FUNGSI BARU: RADAR DIVIDEN ---
+                div_messages = []
+                for t in symbols:
+                    try:
+                        info = yf.Ticker(f"{t}.JK").calendar
+                        if info is not None and not info.empty and 'Dividend Date' in info.index:
+                            div_date = info.loc['Dividend Date'].iloc[0]
+                            if pd.notna(div_date) and div_date.date() >= datetime.now().date():
+                                div_messages.append(f"💰 **RADAR DIVIDEN:** {t} dijadwalkan akan bagi dividen pada {div_date.date().strftime('%d %B %Y')}")
+                    except: pass
+                
+                if div_messages:
+                    for msg in div_messages: st.success(msg)
+                else:
+                    st.info("ℹ️ Tidak terdeteksi jadwal pembagian dividen dalam waktu dekat untuk saham di portofolio Anda.")
+
+            # --- PROSES PERHITUNGAN PnL (KODE EKSISTING) ---
+            total_modal = 0; total_valuasi = 0
+            table_rows = []
+
+            for _, row in edited_df.iterrows():
+                if pd.isna(row['Kode Saham']) or str(row['Kode Saham']).strip() == "": continue
+                sym = str(row['Kode Saham']).upper()
+                avg_p = float(row['Harga Beli'])
+                lot = int(row['Jumlah Lot'])
+                lembar = lot * 100
+                
+                modal = avg_p * lembar
+                curr_p = current_prices.get(sym, avg_p)
+                valuasi = curr_p * lembar
+                
+                pnl_rp = valuasi - modal
+                pnl_pct = (pnl_rp / modal) * 100 if modal > 0 else 0
+                total_modal += modal; total_valuasi += valuasi
+
+                # --- AI LOGIC (Actionable Insights) ---
+                if pnl_pct <= -15: rekomendasi = "🚨 Urgensi Cut Loss"
+                elif pnl_pct <= -5: rekomendasi = "💎 Cari Peluang Avg Down"
+                elif pnl_pct >= 15: rekomendasi = "💰 Take Profit Parsial"
+                elif pnl_pct >= 5: rekomendasi = "📈 Tren Positif (Hold)"
+                else: rekomendasi = "⏳ Konsolidasi (Hold)"
+
+                table_rows.append({
+                    "Saham": sym, "Lot": lot, "Avg Price": f"Rp {avg_p:,.0f}", 
+                    "Last Price": f"Rp {curr_p:,.0f}", "PnL (%)": pnl_pct, "Aksi AI": rekomendasi,
+                    "Valuasi": valuasi
+                })
+
+            total_pnl_rp = total_valuasi - total_modal
+            total_pnl_pct = (total_pnl_rp / total_modal) * 100 if total_modal > 0 else 0
+            health_score = max(0, min(100, 60 + (total_pnl_pct * 2)))
+
+            # --- DASHBOARD METRIK UTAMA ---
+            st.divider()
+            c_dash1, c_dash2, c_dash3 = st.columns(3)
+            c_dash1.metric("Total Aset", f"Rp {total_valuasi:,.0f}")
+            c_dash2.metric("Floating PnL", f"Rp {total_pnl_rp:,.0f}", f"{total_pnl_pct:.2f}%", delta_color="normal" if total_pnl_rp >=0 else "inverse")
+            c_dash3.metric("Skor Kesehatan", f"{health_score:.0f} / 100", "Sehat" if health_score >= 60 else "Perlu Perbaikan", delta_color="normal" if health_score >= 60 else "inverse")
+
+            # --- VISUALISASI ALOKASI & RISIKO ---
+            st.divider()
+            df_display = pd.DataFrame(table_rows)
+            
+            c_chart1, c_chart2 = st.columns(2)
+            with c_chart1:
+                st.subheader("🥧 Alokasi Aset")
+                fig_pie = go.Figure(data=[go.Pie(labels=df_display['Saham'], values=df_display['Valuasi'], hole=.4)])
+                fig_pie.update_layout(height=300, template="plotly_dark", margin=dict(l=0, r=0, t=10, b=0), showlegend=True)
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            with c_chart2:
+                st.subheader("🛡️ Radar Diversifikasi")
+                if user_role == 'free':
+                    st.warning("🔒 **Fitur Eksklusif VIP Terkunci**")
+                    st.info("Ketahui apakah portofolio Anda memiliki risiko fatal karena terlalu menumpuk di satu keranjang.")
+                    st.button("Upgrade VIP Sekarang 🚀", key="div_upgrade")
+                else:
+                    max_weight = (df_display['Valuasi'].max() / total_valuasi) * 100 if total_valuasi > 0 else 0
+                    biggest_stock = df_display.loc[df_display['Valuasi'].idxmax(), 'Saham'] if total_valuasi > 0 else "N/A"
+                    
+                    if len(df_display) < 2:
+                        st.warning(f"⚠️ **Portofolio Terlalu Sepi.** 100% dana Anda ada di **{biggest_stock}**. Sangat rawan jika saham ini tiba-tiba anjlok (All-in).")
+                    elif max_weight > 50:
+                        st.error(f"🚨 **Risiko Tinggi!** {max_weight:.1f}% dana Anda menumpuk di saham **{biggest_stock}**. Lakukan *rebalancing*.")
+                    else:
+                        st.success("✅ **Diversifikasi Sangat Sehat.** Tidak ada saham yang mendominasi lebih dari 50%.")
+
+            # --- TABEL DETAIL PORTOFOLIO ---
+            st.subheader("📋 Detail Aset & Rekomendasi AI")
+            df_table_view = df_display.drop(columns=['Valuasi']) if 'Valuasi' in df_display.columns else df_display
+
+            if user_role == 'free':
+                df_table_view['Aksi AI'] = "🔒 Akses VIP"
+                st.dataframe(
+                    df_table_view.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
+                    use_container_width=True, hide_index=True
+                )
+                st.info("🔒 **Buka Kunci Rekomendasi AI (VIP):** Biarkan AI kami yang berpikir kapan harus *Cut Loss* atau *Average Down*.")
+                st.button("Upgrade VIP Sekarang 🚀", key="robo_upgrade")
+            else:
+                st.success("💎 **VIP AI Active:** Sistem memantau portofolio Anda secara real-time.")
+                st.dataframe(
+                    df_table_view.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
+                    use_container_width=True, hide_index=True
+                )
+
 
 
 # ==============================================================================
