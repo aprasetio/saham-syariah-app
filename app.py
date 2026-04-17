@@ -1565,6 +1565,35 @@ def get_historical_gold_idr(period="1y"):
         print(f"Error Chart Emas: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_macro_correlation_data(period="1y"):
+    """Menarik data korelasi Emas vs US10Y Treasury Yield untuk User VIP"""
+    try:
+        gold = yf.Ticker("XAUUSD=X").history(period=period)
+        if gold.empty: gold = yf.Ticker("GC=F").history(period=period)
+        
+        # Tarik data US 10-Year Treasury Yield (^TNX)
+        us10y = yf.Ticker("^TNX").history(period=period)
+        
+        if gold.empty or us10y.empty: return pd.DataFrame()
+        
+        # Normalisasi Zona Waktu
+        gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
+        us10y.index = pd.to_datetime(us10y.index).tz_localize(None).normalize()
+        
+        gold = gold[~gold.index.duplicated(keep='last')]
+        us10y = us10y[~us10y.index.duplicated(keep='last')]
+        
+        # Gabungkan data
+        df = pd.DataFrame({'Gold': gold['Close'], 'US10Y': us10y['Close']}).dropna()
+        
+        # Hitung Tren Rata-rata 50 Hari untuk Yield AS
+        df['US10Y_MA50'] = df['US10Y'].rolling(window=50).mean()
+        return df
+    except Exception as e:
+        print(f"Error Macro Data: {e}")
+        return pd.DataFrame()
+        
 def show_gold_predictor():
     st.header("🥇 Emas Antam & Makro Safe Haven")
     
@@ -1696,7 +1725,49 @@ def show_gold_predictor():
             
             fig.update_layout(height=500, template="plotly_dark", margin=dict(l=0,r=0,t=20,b=0), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
+
+            # ... (KODE GRAFIK RSI ANDA ADA DI ATAS SINI) ...
             
+            # ==========================================
+            # FITUR BARU VIP: SINYAL MAKRO US10Y YIELD
+            # ==========================================
+            st.divider()
+            st.subheader("🌐 Sinyal Makro: Emas vs Suku Bunga AS")
+            st.markdown("Musuh utama Emas adalah Suku Bunga Obligasi AS (*US10Y Treasury Yield*). Secara historis, pergerakannya selalu terbalik (Korelasi Negatif). **Jika Yield AS turun, Emas akan meroket.**")
+
+            with st.spinner("Menarik data makro ekonomi global..."):
+                df_macro = get_macro_correlation_data("1y")
+                
+            if not df_macro.empty:
+                curr_yield = df_macro['US10Y'].iloc[-1]
+                ma50_yield = df_macro['US10Y_MA50'].iloc[-1]
+                
+                c_mac1, c_mac2 = st.columns([1, 2])
+                with c_mac1:
+                    st.metric("Suku Bunga AS (US10Y)", f"{curr_yield:.2f}%", f"{curr_yield - df_macro['US10Y'].iloc[-2]:.2f}%", delta_color="inverse")
+                with c_mac2:
+                    if pd.isna(ma50_yield):
+                        st.info("🔄 Mengumpulkan data tren suku bunga...")
+                    elif curr_yield < ma50_yield:
+                        st.success("🟢 **Angin Segar (Tailwind):** Yield obligasi AS sedang dalam tren TURUN (Berada di bawah rata-rata 50 harinya). Ini adalah sentimen yang **SANGAT POSITIF** untuk laju harga emas ke depan.")
+                    else:
+                        st.error("🔴 **Angin Sakal (Headwind):** Yield obligasi AS sedang dalam tren NAIK (Berada di atas rata-rata 50 harinya). Harga emas berpotensi tertekan atau terkoreksi dalam waktu dekat.")
+                
+                # Grafik Multi-Axis (Kiri Emas, Kanan Yield)
+                fig_macro = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_macro.add_trace(go.Scatter(x=df_macro.index, y=df_macro['Gold'], name="Emas (USD)", line=dict(color='gold', width=2)), secondary_y=False)
+                fig_macro.add_trace(go.Scatter(x=df_macro.index, y=df_macro['US10Y'], name="US10Y Yield (%)", line=dict(color='red', dash='dot')), secondary_y=True)
+                
+                fig_macro.update_layout(height=400, template="plotly_dark", margin=dict(l=0,r=0,t=20,b=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig_macro.update_yaxes(title_text="Harga Emas ($/oz)", secondary_y=False)
+                fig_macro.update_yaxes(title_text="Suku Bunga (%)", secondary_y=True)
+                
+                st.plotly_chart(fig_macro, use_container_width=True)
+
+
+
+
+
 # --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
