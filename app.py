@@ -1012,33 +1012,39 @@ def show_admin_dashboard():
 
                 # 2. Alat Pengubah Role (Upgrade / Downgrade)
                 st.markdown("##### ⚙️ Update Status Langganan")
-                with st.expander("Klik untuk mengubah Role / Akses User", expanded=True):
-                    c_email, c_role, c_btn = st.columns([2, 1, 1])
-                    
+                with st.expander("⚙️ Konfigurasi Role & Kuota API User", expanded=True):
+                    # Kita buat 3 kolom agar input kuota bisa masuk
+                    c_email, c_role, c_quota = st.columns([2, 1, 1])
+
                     target_email = c_email.selectbox("Pilih Email Pengguna:", df_users['email'].unique())
                     current_user_data = df_users[df_users['email'] == target_email].iloc[0]
-                    
-                    # Menampilkan list lengkap yang Anda gunakan
+
                     role_list = ["free", "trial", "pro", "admin"]
                     current_idx = role_list.index(current_user_data['role']) if current_user_data['role'] in role_list else 0
-                    
+
                     new_role = c_role.selectbox("Ubah Ke Role:", role_list, index=current_idx)
 
-                    c_btn.markdown("<br>", unsafe_allow_html=True)
-                    if c_btn.button("Update Role", type="primary", use_container_width=True):
-                        # Update ke Database
-                        supabase.table('profiles').update({'role': new_role}).eq('id', current_user_data['id']).execute()
-                        
-                        # Catat aktivitas ini ke dalam Audit Log Anda!
+                    # INPUT BARU: Bebas tentukan kuota harian untuk user ini
+                    current_quota_val = int(current_user_data.get('daily_quota', 0))
+                    new_quota = c_quota.number_input("Limit Kuota Harian:", min_value=0, value=current_quota_val)
+
+                    if st.button("💾 Simpan Perubahan Akun", type="primary", use_container_width=True):
+                        # Update Role sekaligus Limit Kuota ke Database
+                        supabase.table('profiles').update({
+                            'role': new_role,
+                            'daily_quota': new_quota
+                        }).eq('id', current_user_data['id']).execute()
+
+                        # Catat ke Audit Log
                         try:
                             supabase.table('audit_logs').insert({
-                                "user_email": user_email, "action": "ADMIN_CHANGE_ROLE", 
-                                "details": f"Admin mengubah role {target_email} dari {current_user_data['role']} menjadi {new_role}"
+                                "user_email": user_email, "action": "ADMIN_UPDATE_ACCOUNT", 
+                                "details": f"Admin mengubah {target_email} -> Role: {new_role}, Kuota: {new_quota}"
                             }).execute()
                         except: pass
-                        
-                        st.success(f"Berhasil! {target_email} diperbarui menjadi {new_role.upper()}")
-                        time.sleep(1)
+
+                        st.success(f"Berhasil! {target_email} diperbarui (Role: {new_role.upper()}, Kuota: {new_quota})")
+                        time.sleep(1.5)
                         st.rerun()
 
                 # 3. Tabel Data Pengguna (Dengan Proteksi Kolom missing_index)
@@ -2287,11 +2293,30 @@ st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
 role_color = "green" if user_role == 'admin' else ("blue" if user_role == 'vip' else "gray")
 st.sidebar.markdown(f"Status Akun: <span style='color:{role_color}; font-weight:bold;'>{user_role.upper()}</span>", unsafe_allow_html=True)
 
+# --- VISUALISASI METERAN KUOTA API ---
 try:
-    current_db = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).execute().data[0]
-    st.sidebar.caption(f"Sisa Kuota API Personal: **{current_db['daily_quota'] - current_db['used_quota']} / {current_db['daily_quota']}**")
-except: pass
-st.sidebar.divider()
+    current_db = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).single().execute().data
+    limit_q = current_db.get('daily_quota', 0)
+    used_q = current_db.get('used_quota', 0)
+except:
+    limit_q = 0; used_q = 0
+
+if user_role == 'admin':
+    st.sidebar.success("⚡ Kuota API: **UNLIMITED**")
+else:
+    sisa_q = max(0, limit_q - used_q)
+    prog_val = min(1.0, used_q / limit_q) if limit_q > 0 else 1.0
+
+    if sisa_q == 0:
+        st.sidebar.error(f"⚠️ Sisa Kuota: **{sisa_q} / {limit_q}**")
+        st.sidebar.progress(prog_val)
+        st.sidebar.caption("🚨 Kuota habis. Reset otomatis pukul 00:00 WIB.")
+    elif prog_val > 0.8:
+        st.sidebar.warning(f"⚡ Sisa Kuota: **{sisa_q} / {limit_q}**")
+        st.sidebar.progress(prog_val)
+    else:
+        st.sidebar.info(f"⚡ Sisa Kuota: **{sisa_q} / {limit_q}**")
+        st.sidebar.progress(prog_val)
 
 # --- INISIALISASI MEMORI SMART BRIDGE ---
 if 'active_menu' not in st.session_state:
