@@ -1637,9 +1637,7 @@ def show_gold_predictor():
             st.divider()
             st.caption("ℹ️ *Estimasi di atas sudah termasuk biaya cetak rata-rata di Butik Antam. Harga resmi mungkin sedikit berbeda tergantung lokasi butik.*")
 
-            # ... (Kode 3 Metrik Pecahan Anda ada di atas sini) ...
-            st.divider()
-            st.caption("ℹ️ *Estimasi di atas sudah termasuk biaya cetak rata-rata di Butik Antam. Harga resmi mungkin sedikit berbeda tergantung lokasi butik.*")
+           
 
             # ==========================================
             # FITUR BARU: KALKULATOR BREAK-EVEN BUYBACK
