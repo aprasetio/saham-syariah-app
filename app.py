@@ -1856,17 +1856,7 @@ def show_portfolio_advisor():
     st.header("💼 Robo-Advisor Portofolio")
     st.markdown("Asisten AI yang memantau kesehatan aset Anda dan memberikan rekomendasi *Take Profit*, *Cut Loss*, atau *Average Down*.")
 
-    # 1. CEK LOGIN (Sesuaikan dengan sistem otentikasi Anda)
-    # Jika menggunakan session_state.user_id, gunakan baris di bawah:
-    user_id = st.session_state.get('user_id') 
-    
-    # Fallback: Jika sistem belum ada login, kita gunakan ID Dummy sementara untuk uji coba
-    if not user_id:
-        st.warning("⚠️ **Mode Simulasi Aktif.** Untuk menyimpan data secara permanen, fitur Login harus diaktifkan kelak.")
-        user_id = "00000000-0000-0000-0000-000000000000" # Dummy UUID
-        # return # Hapus tanda pagar di awal baris ini nanti jika sistem Login Anda sudah jalan
-
-    # 2. FORM INPUT SAHAM (Tambah / Edit)
+    # 1. FORM INPUT SAHAM (Tambah / Edit)
     with st.expander("➕ Tambah / Edit Saham", expanded=True):
         with st.form("add_porto_form", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
@@ -1879,27 +1869,27 @@ def show_portfolio_advisor():
             if submit_porto and input_sym:
                 clean_sym = input_sym.replace(".JK", "")
                 try:
-                    # Cek apakah saham sudah ada di portofolio user
+                    # Menggunakan variabel user_id global dari sistem login Anda
                     existing = supabase.table('user_portfolios').select('id').eq('user_id', user_id).eq('symbol', clean_sym).execute()
                     
                     if existing.data:
-                        # UPDATE jika sudah ada (Average/Jual sebagian)
+                        # UPDATE
                         supabase.table('user_portfolios').update({
                             'avg_price': float(input_price), 'total_lot': int(input_lot)
                         }).eq('id', existing.data[0]['id']).execute()
                     else:
-                        # INSERT jika belum ada
+                        # INSERT
                         supabase.table('user_portfolios').insert({
                             'user_id': user_id, 'symbol': clean_sym, 'avg_price': float(input_price), 'total_lot': int(input_lot)
                         }).execute()
                     
                     st.success(f"✅ Saham {clean_sym} berhasil disimpan!")
                     time.sleep(1)
-                    st.rerun() # Refresh agar data baru muncul
+                    st.rerun()
                 except Exception as e:
-                    st.error(f"Gagal menyimpan data ke database. Cek koneksi Supabase Anda: {e}")
+                    st.error(f"Gagal menyimpan data ke database: {e}")
 
-    # 3. TARIK DATA DARI DATABASE
+    # 2. TARIK DATA DARI DATABASE
     try:
         res = supabase.table('user_portfolios').select('*').eq('user_id', user_id).execute()
         porto_data = res.data
@@ -1911,7 +1901,7 @@ def show_portfolio_advisor():
         st.info("💡 Portofolio Anda masih kosong. Silakan tambah saham di formulir atas.")
         return
 
-    # 4. PROSES & HITUNG FLOATING PnL
+    # 3. PROSES & HITUNG FLOATING PnL
     df_porto = pd.DataFrame(porto_data)
     symbols = df_porto['symbol'].tolist()
     
@@ -1926,7 +1916,7 @@ def show_portfolio_advisor():
         lembar = lot * 100
         
         modal = avg_p * lembar
-        curr_p = current_prices.get(sym, avg_p) # Fallback ke harga beli jika gagal narik data
+        curr_p = current_prices.get(sym, avg_p)
         valuasi = curr_p * lembar
         
         pnl_rp = valuasi - modal
@@ -1950,7 +1940,7 @@ def show_portfolio_advisor():
     total_pnl_pct = (total_pnl_rp / total_modal) * 100 if total_modal > 0 else 0
     health_score = max(0, min(100, 60 + (total_pnl_pct * 2)))
 
-    # 5. DASHBOARD METRIK UTAMA
+    # 4. DASHBOARD METRIK UTAMA
     st.divider()
     c_dash1, c_dash2, c_dash3 = st.columns(3)
     c_dash1.metric("Total Aset", f"Rp {total_valuasi:,.0f}")
@@ -1960,14 +1950,14 @@ def show_portfolio_advisor():
     st.subheader("📋 Detail Aset & Rekomendasi AI")
     df_display = pd.DataFrame(table_rows)
     
-    # --- GEMBOK VIP ---
+    # --- GEMBOK VIP MENGGUNAKAN GLOBAL user_role ---
     if user_role == 'free':
         df_display['Aksi AI'] = "🔒 Akses VIP"
         st.dataframe(
             df_display.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
             use_container_width=True, hide_index=True
         )
-        st.info("🔒 **Buka Kunci Rekomendasi AI (VIP):** Biarkan AI kami yang berpikir. Dapatkan instruksi matematis apakah saham yang sedang *nyangkut* harus di *Cut Loss* atau justru di *Average Down* (Beli Lagi) berdasarkan data historis.")
+        st.info("🔒 **Buka Kunci Rekomendasi AI (VIP):** Biarkan AI kami yang berpikir kapan harus *Cut Loss* atau *Average Down*.")
         st.button("Upgrade VIP Sekarang 🚀", key="robo_upgrade")
     else:
         st.success("💎 **VIP AI Active:** Sistem memantau portofolio Anda secara real-time.")
@@ -1981,7 +1971,7 @@ def show_portfolio_advisor():
             del_sym = st.selectbox("Pilih Saham yang sudah Anda jual (Clear Position):", df_porto['symbol'].tolist())
             if st.button("Hapus Saham", type="primary"):
                 supabase.table('user_portfolios').delete().eq('user_id', user_id).eq('symbol', del_sym).execute()
-                st.success(f"{del_sym} dihapus dari pantauan.")
+                st.success(f"{del_sym} dihapus.")
                 time.sleep(1)
                 st.rerun()
 
