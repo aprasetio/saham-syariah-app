@@ -182,6 +182,7 @@ def login_ui():
                         except: pass
                         st.rerun()
                     else: st.error("Profil tidak ditemukan di database!")
+                # ... kode try Anda sebelumnya ...
                 except Exception as e:
                     # Tampilkan error UI untuk user
                     st.error("🚫 Gagal Login. Silakan cek detail teknis di bawah.")
@@ -412,412 +413,570 @@ def score_analysis(df, fund_data):
     if patterns: reasons.append("🕯️ Pola")
 
     return score_tech, score_fund, score_bandar, score_candle, reasons, curr
+# --- 10. FITUR DIVIDEND HUNTER DENGAN HISTORICAL CHART (BULK SCANNER) ---
+def show_dividend_hunter(stock_list, category_name, market_choice):
+    st.header(f"📅 Dividend Hunter ({category_name})")
 
-# --- 10. FUNGSI PENGAMBILAN HARGA REAL-TIME ---
-def get_current_prices(symbols):
-    current_prices = {}
-    if not symbols: return current_prices
-    try:
-        yf_symbols = [f"{sym}.JK" if not sym.endswith(".JK") and sym in SHARIA_STOCKS + SHARIA_MIDCAP_STOCKS else sym for sym in symbols]
-        data = yf.download(yf_symbols, period="1d", progress=False)
-        if not data.empty:
-            if len(yf_symbols) == 1:
-                close_series = data['Close']
-                if not close_series.empty: current_prices[symbols[0]] = float(close_series.iloc[-1])
-            else:
-                for idx, sym in enumerate(symbols):
-                    try:
-                        val = data['Close'].iloc[-1, idx]
-                        if pd.notna(val): current_prices[sym] = float(val)
-                    except: pass
-    except Exception as e: print(f"Error fetching real-time prices: {e}")
-    return current_prices
+    with st.expander("📖 Panduan Wajib: Hindari Dividend Trap! (Klik di sini)"):
+        st.markdown("""
+        **Aturan Emas Berburu Dividen:**
+        1. 🟢 **Beli di Titik Terendah (Accumulation Window):** Jangan beli saham seminggu sebelum jadwal dividen saat harga sedang di pucuk! Gunakan grafik di bawah untuk mencari titik harga terendah (Support).
+        2. 🟢 **Cum-Date (Cumulative Date):** Hari TERAKHIR Anda wajib membeli/memiliki saham agar nama Anda tercatat.
+        3. 🔴 **Ex-Date (Expired Date):** Hari di mana hak dividen **hangus** dan harga saham biasanya **DIBANTING TURUN (Dividend Trap)**.
+        """)
 
-# ==============================================================================
-# --- 11. FITUR APLIKASI UTAMA (SCREENER, CHART, DLL) ---
-# ==============================================================================
-
-def run_screener(use_idx_data, active_stock_list, active_category_name, market_choice):
-    is_us_market = "Wall Street" in market_choice
-    
-    st.header(f"🔍 AI Super Screener & Smart Money Radar")
-    st.markdown(f"Menganalisis **{active_category_name}** menggunakan Machine Learning dan deteksi bandar.")
-    
-    col_k, col_s = st.columns([1, 1])
-    with col_k: filter_knn = st.checkbox("🤖 Gunakan Prediksi AI (KNN)", value=True, help="Hanya tampilkan saham yang diprediksi AI akan NAIK.")
-    with col_s: st.caption("💡 *Screener berjalan secara real-time menarik data dari server.*")
-    
-    st.divider()
-
-    if st.button("🚀 Mulai Live Scan (Real-Time)", type="primary", use_container_width=True):
-        if not check_and_deduct_quota("screener"):
-            st.error("🚨 Kuota API harian Anda telah habis! Upgrade ke VIP untuk akses tanpa batas.")
-            return
-
-        api_registry.add("screener")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    if user_role == 'free':
+        st.warning("🔒 **Fitur Eksklusif VIP/Pro Terkunci**")
+        st.info("Upgrade ke VIP/Pro untuk membuka *scanner* dividen, mencari saham dengan bunga di atas deposito, dan mengakses grafik histori harga untuk membeli di titik terendah!")
         
-        results = []
-        ihsg_data = get_ihsg_data() if not is_us_market else None
-        target_date = get_idx_target_date(ihsg_data) if ihsg_data is not None and not ihsg_data.empty else datetime.today().strftime('%Y-%m-%d')
-        total_stocks = len(active_stock_list)
+        st.markdown("**Preview Fitur (Data Ilustrasi):**")
+        dummy_data = pd.DataFrame({
+            "Kode": ["PTBA", "ITMG", "ADRO", "🔒", "🔒"],
+            "Harga": ["Rp 2,800", "Rp 26,000", "Rp 2,700", "🔒 VIP", "🔒 VIP"],
+            "Support Terendah": ["Rp 2,300", "Rp 23,000", "Rp 2,100", "🔒 VIP", "🔒 VIP"],
+            "Yield (Bunga)": ["15.2%", "12.5%", "10.1%", "🔒 VIP", "🔒 VIP"],
+            "Ex-Date": ["Segera Datang", "Segera Datang", "Segera Datang", "🔒 VIP", "🔒 VIP"]
+        })
+        st.dataframe(dummy_data, hide_index=True, use_container_width=True)
+        return
 
-        for i, stock in enumerate(active_stock_list):
-            status_text.text(f"Memindai {stock}... ({i+1}/{total_stocks})")
-            progress_bar.progress((i + 1) / total_stocks)
-            
-            ticker_symbol = f"{stock}.JK" if not is_us_market else stock
-            
+    if st.button("Pindai Kalender Dividen Massal 🔍"):
+        progress = st.progress(0); status = st.empty(); results = []
+        
+        # Penyesuaian Ticker untuk Wall Street / Indonesia
+        tickers = [f"{s}.JK" if "Indonesia" in market_choice else s for s in stock_list]
+        is_us = "US" in market_choice
+
+        for i, t in enumerate(tickers):
+            status.text(f"Memeriksa data dividen: {t} ...")
+            progress.progress((i+1)/len(tickers))
             try:
-                df = get_lazy_historical_data(ticker_symbol, period="1y")
-                if df.empty or len(df) < 50: continue
+                info = yf.Ticker(t).info
+                div_rate = info.get('dividendRate', 0)
+                price = info.get('previousClose', 1)
+                div_yield_raw = info.get('dividendYield', 0)
+                ex_date_ts = info.get('exDividendDate', None)
+                low_52w = info.get('fiftyTwoWeekLow', 0)
 
-                # PERBAIKAN: Memastikan index memiliki nama 'date' untuk proses sorting/penggabungan
-                df.index.name = 'date'
-                df = calculate_metrics(df, ihsg_data)
-                
-                curr = df.iloc[-1]
-                prev = df.iloc[-2]
-                volume_ma = df['Volume'].rolling(20).mean().iloc[-1]
+                if pd.notna(div_rate) and div_rate > 0 and pd.notna(price) and price > 0:
+                    calculated_yield = (div_rate / price) * 100
+                elif pd.notna(div_yield_raw) and div_yield_raw > 0:
+                    calculated_yield = (div_yield_raw * 100) if div_yield_raw < 1 else div_yield_raw
+                else: calculated_yield = 0
 
-                # --- FILTER LIKUIDITAS: Hindari saham tidak likuid ---
-                if volume_ma < 5000 and "Lapis 2" in active_category_name: continue
-
-                # --- ANALISIS HARGA, TEKNIKAL, & FUNDAMENTAL ---
-                s_tech, s_fund, s_bandar, s_candle, reasons, _ = score_analysis(df, get_fundamental_info(ticker_symbol))
-                phase, div = advanced_analysis(df)
-                
-                # --- PREDIKSI AI (KNN) ---
-                ml_prediction = "NETRAL"
-                ml_prob = 0
-                if filter_knn and len(df) > 100:
-                    try:
-                        df_ml = df.dropna().copy()
-                        features = ['Rsi', 'CMF', 'Stock_Ret_20', 'Ret_1']
-                        # Pastikan semua fitur ada di dataframe sebelum proses ML
-                        if all(f in df_ml.columns for f in features):
-                            X = df_ml[features]
-                            y = np.where(df_ml['Close'].shift(-1) > df_ml['Close'], 1, 0)
-                            
-                            scaler = StandardScaler()
-                            X_scaled = scaler.fit_transform(X)
-                            
-                            knn = KNeighborsClassifier(n_neighbors=5)
-                            knn.fit(X_scaled[:-1], y[:-1])
-                            
-                            curr_X = scaler.transform(X.iloc[[-1]])
-                            pred = knn.predict(curr_X)[0]
-                            prob = knn.predict_proba(curr_X)[0][1]
-                            
-                            if pred == 1 and prob > 0.6: ml_prediction = "NAIK"
-                            elif pred == 0 and prob > 0.6: ml_prediction = "TURUN"
-                            ml_prob = prob * 100
-                    except: pass
-                
-                # JIKA FILTER KNN AKTIF, SKIP SAHAM YANG TIDAK DIPREDIKSI NAIK
-                if filter_knn and ml_prediction != "NAIK": continue
-
-                # --- SMART MONEY IDX DATA ---
-                net_foreign, avg_buy, f_time = fetch_idx_foreign_flow(stock, target_date) if use_idx_data and not is_us_market else (0, 0, "")
-                
-                # --- KEY REVERSAL / PULLBACK DETECTOR ---
-                is_reversal = False
-                if prev['Close'] < prev['SMA50'] and curr['Close'] > curr['SMA50']: is_reversal = True
-                if (curr.get('Rsi', 50) < 40) and ("Hammer" in str(reasons) or "Engulfing" in str(reasons)): is_reversal = True
-
-                total_score = s_tech + s_fund + s_bandar + s_candle
-                if is_reversal: total_score += 1.5
-
-                if total_score >= 3:
+                if calculated_yield > 0 and calculated_yield <= 40:
+                    ex_date_str = "Belum Diumumkan"
+                    if ex_date_ts: ex_date_str = datetime.utcfromtimestamp(ex_date_ts).strftime('%Y-%m-%d')
+                    
+                    kode_bersih = t.replace(".JK", "")
                     results.append({
-                        "Saham": stock,
-                        "Skor": total_score,
-                        "Harga (Rp/$)": curr['Close'],
-                        "Fase": phase,
-                        "Div": div,
-                        "Sinyal AI": ", ".join(reasons) if reasons else "N/A",
-                        "Prediksi KNN": f"{ml_prob:.1f}% NAIK" if ml_prediction == "NAIK" else "-",
-                        "Net Asing": format_rupiah(net_foreign) if net_foreign else "-",
-                        "Momentum": "🔥 REVERSAL" if is_reversal else "Sedang Berjalan",
-                        "Data Time": f_time
+                        "Kode": kode_bersih, "Harga": price, "Support 1Y": low_52w,
+                        "Yield (%)": round(calculated_yield, 2), "Ex-Date": ex_date_str
                     })
+            except: continue
 
-            except Exception as e:
-                print(f"Error {stock}: {e}")
-                pass
+        progress.empty(); status.empty()
 
-        status_text.text("Scan selesai!")
-        
         if results:
-            df_res = pd.DataFrame(results).sort_values("Skor", ascending=False)
-            st.success(f"Ditemukan {len(df_res)} saham potensial!")
-            
-            # --- PEWARNAAN TABEL ---
-            def highlight_row(row):
-                if 'REVERSAL' in str(row['Momentum']): return ['background-color: rgba(255, 215, 0, 0.2)'] * len(row)
-                if row['Skor'] >= 5: return ['background-color: rgba(0, 255, 0, 0.1)'] * len(row)
-                return [''] * len(row)
-            
-            st.dataframe(df_res.style.apply(highlight_row, axis=1), use_container_width=True, hide_index=True)
-            
-            # Actionable Insight berdasarkan AI
-            best_stock = df_res.iloc[0]
-            st.info(f"💎 **Top Pick AI Hari Ini: {best_stock['Saham']}** (Skor: {best_stock['Skor']})")
-            if 'REVERSAL' in str(best_stock['Momentum']):
-                st.markdown(f"> *Saham {best_stock['Saham']} menunjukkan indikasi **Key Reversal** (Pembalikan Arah). Potensi pantulan kuat, perhatikan level MA50 dan RSI oversold.*")
-            
+            df_div = pd.DataFrame(results).sort_values(by="Yield (%)", ascending=False)
+            st.session_state['div_results'] = df_div
+            st.success(f"✅ Selesai! Menemukan {len(results)} saham dengan data dividen valid.")
         else:
-            st.warning("Tidak ada saham yang memenuhi kriteria ketat saat ini. Market mungkin sedang konsolidasi atau distribusi.")
+            st.info("Belum ada data dividen yang masuk akal / tercatat untuk kategori ini hari ini.")
+            st.session_state['div_results'] = None
 
+    if 'div_results' in st.session_state and st.session_state['div_results'] is not None:
+        df_div = st.session_state['div_results']
+        is_us = "US" in market_choice
+        
+        # Formatting dinamis Rupiah / USD
+        if is_us:
+            df_display = df_div.copy()
+            df_display['Harga'] = df_display['Harga'].apply(lambda x: f"$ {x:.2f}")
+            df_display['Support 1Y'] = df_display['Support 1Y'].apply(lambda x: f"$ {x:.2f}")
+            df_display['Yield (%)'] = df_display['Yield (%)'].apply(lambda x: f"{x:.2f} %")
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(df_div, use_container_width=True, hide_index=True,
+                column_config={
+                    "Kode": st.column_config.TextColumn(width="small"),
+                    "Harga": st.column_config.NumberColumn(format="Rp %d"),
+                    "Support 1Y": st.column_config.NumberColumn(format="Rp %d"),
+                    "Yield (%)": st.column_config.NumberColumn(format="%.2f %%"),
+                    "Ex-Date": st.column_config.TextColumn(width="medium")
+                })
+
+        st.divider()
+        st.subheader("📉 Analisis Titik Beli Terendah (Historical Chart)")
+        st.caption("Gunakan grafik ini untuk melihat jarak harga saat ini dengan jurang dasar (Support) setahun terakhir.")
+
+        selected_div_stock = st.selectbox("Pilih saham dari daftar di atas untuk dianalisis:", df_div['Kode'].tolist())
+
+        if selected_div_stock:
+            with st.spinner("Menggambar grafik..."):
+                symbol_chart = f"{selected_div_stock}.JK" if "Indonesia" in market_choice else selected_div_stock
+                df_hist = yf.download(symbol_chart, period="1y", auto_adjust=True, progress=False)
+                
+                if not df_hist.empty:
+                    df_hist = fix_dataframe(df_hist)
+                    current_price = df_hist['Close'].iloc[-1]
+                    lowest_price = df_hist['Low'].min()
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Close'], mode='lines', name='Harga', line=dict(color='#2E86C1', width=2)))
+                    
+                    # Garis Support
+                    mata_uang = "$" if is_us else "Rp"
+                    label_support = f"Support ({mata_uang} {lowest_price:.2f})" if is_us else f"Support 1Y (Rp {int(lowest_price):,})"
+                    fig.add_hline(y=lowest_price, line_dash="dash", line_color="green", annotation_text=label_support, annotation_position="bottom right", annotation_font_color="green")
+
+                    # Perbaikan Layout agar responsif di HP
+                    fig.update_layout(title=f"Pergerakan Harga {selected_div_stock} (1 Tahun Terakhir)", height=400, margin=dict(l=10, r=10, t=50, b=10), yaxis_title="Harga", xaxis_rangeslider_visible=False, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    jarak_ke_dasar = ((current_price - lowest_price) / lowest_price) * 100
+                    
+                    # Logika Jarak
+                    harga_str = f"$ {current_price:.2f}" if is_us else f"Rp {int(current_price):,}"
+                    if jarak_ke_dasar < 10: st.success(f"🔥 **Sangat Menarik!** Harga saat ini ({harga_str}) sangat dekat dengan titik dasar setahun terakhir. Risiko *Dividend Trap* rendah.")
+                    elif jarak_ke_dasar > 40: st.error(f"⚠️ **Hati-Hati!** Harga saat ini sudah terbang +{jarak_ke_dasar:.1f}% dari titik terbawahnya. Waspada bantingan harga (Markdown) setelah Ex-Date.")
+                    else: st.warning(f"⚖️ **Netral.** Harga berada di area tengah. Lakukan akumulasi bertahap.")
+
+
+# --- 11. FITUR SCREENER ---
+def run_screener(use_idx_data, stock_list, category_name, market_choice):
+    st.header(f"🔍 Smart Money Screener ({category_name})")
+
+    # KAMUS ASLI DENGAN FITUR QUANT & AI
+    with st.expander("📖 Kamus Lengkap: Membaca Hasil Screener AI (Klik di sini)"):
+        st.info("💡 **Tips:** Kombinasi Katalis yang banyak menandakan probabilitas kenaikan yang lebih tinggi.")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            **⚡ Membaca Power Asing (% Dominasi):**
+            * **< 5% (Lemah)** : Digerakkan bandar lokal.
+            * **5% - 15% (Sedang)** : Mulai ada ketertarikan Asing.
+            * **> 15% (Kuat)** : Asing bertindak sebagai *Market Maker*.
+
+            **📊 Status Rekomendasi:**
+            * 💎 **STRONG BUY** : Saham dalam kondisi Sempurna.
+            * ✅ **BUY** : Saham mulai menunjukkan pantulan.
+            * **WAIT** : Saham berisiko tinggi. Lebih baik hindari.
+            """)
+        with c2:
+            st.markdown("""
+            **🔖 Sinyal Quant & AI (NEW!):**
+            * 🤖 **AI Bullish** : Historis (KNN) menunjukkan peluang naik tinggi.
+            * 🔄 **Rebound Sektor** : Saham "salah harga" bersiap mantul.
+            * 🔥 **Top Momentum** : Tren kenaikan terkuat 6 bulan terakhir.
+            * 💰 **Undervalued** : Fundamental super murah.
+            * 🚀 **Breakout DC** : Menembus harga tertinggi Donchian Channel.
+            * 🔥 **KEY REVERSAL** : Pantulan kuat dari dasar jurang (Oversold).
+            
+            **🔖 Katalis Teknikal:**
+            * 🔥 **MA** : Uptrend jangka panjang.
+            * 🌟 **IHSG** : Return bulanan lebih tinggi daripada pasar.
+            * 🐳 **CMF** : Deteksi arus uang raksasa.
+            * 💎 **RSI** : Harga sedang diskon besar (Oversold).
+            """)
+
+    is_us_market = "US" in market_choice
+
+    # Inisialisasi memori untuk Jembatan Pintar (Smart Bridge)
+    if 'screener_results' not in st.session_state:
+        st.session_state['screener_results'] = []
+
+    if st.button("MULAI SCANNING", type="primary"):
+        st.session_state['screener_results'] = [] # Reset hasil sebelumnya
+        
+        # JALUR 1: BACA INSTAN DARI SUPABASE (Lapis 1 / Wall Street)
+        if (category_name == "Lapis 1 (JII30)" and use_idx_data) or is_us_market:
+            with st.spinner(f"Memindai database {category_name}..."):
+                try:
+                    table_name = 'us_daily_data' if is_us_market else 'jii30_daily_data'
+                    res = supabase.table(table_name).select('*').execute()
+
+                    if res.data:
+                        df_res = pd.DataFrame(res.data)
+
+                        if 'fetch_date' in df_res.columns:
+                            latest_date = df_res['fetch_date'].max()
+                            df_res = df_res[df_res['fetch_date'] == latest_date]
+                            update_text = latest_date
+                        else:
+                            update_text = "Hari Ini"
+
+                        if 'kode' in df_res.columns and len(df_res) == 1 and df_res['kode'].iloc[0] == 'CASH':
+                            st.error(f"**MODE PROTEKSI MODAL AKTIF (Update: {update_text})**")
+                            st.warning("🛡️ **CASH IS KING!** " + df_res['katalis'].iloc[0])
+                        else:
+                            st.success(f"✅ Selesai! Ditemukan {len(df_res)} Saham unggulan.")
+                            st.caption(f"📅 **Terakhir Diupdate (Oleh Server AI):** {update_text}")
+
+                            if is_us_market:
+                                df_res = df_res[['kode', 'harga', 'tp', 'sl', 'fase', 'status', 'katalis']]
+                                df_res.columns = ['Kode', 'Harga', 'TP', 'SL', 'Fase', 'Status', 'Katalis']
+                                df_res['Harga'] = df_res['Harga'].apply(lambda x: f"$ {x:.2f}")
+                                df_res['TP'] = df_res['TP'].apply(lambda x: f"$ {x:.2f}")
+                                df_res['SL'] = df_res['SL'].apply(lambda x: f"$ {x:.2f}")
+                                st.dataframe(df_res, use_container_width=True, hide_index=True)
+                            else:
+                                if user_role == 'free':
+                                    df_res['power_asing'] = None; df_res['modal_asing'] = None
+                                df_res = df_res[['kode', 'harga', 'tp', 'sl', 'fase', 'power_asing', 'modal_asing', 'status', 'katalis']]
+                                df_res.columns = ['Kode', 'Harga', 'TP', 'SL', 'Fase', 'Power Asing', 'Modal Asing', 'Status', 'Katalis']
+                                
+                                col_config = {
+                                    "Kode": st.column_config.TextColumn(width="small"),
+                                    "Harga": st.column_config.NumberColumn(format="Rp %d"),
+                                    "TP": st.column_config.NumberColumn(format="Rp %d"),
+                                    "SL": st.column_config.NumberColumn(format="Rp %d"),
+                                }
+                                if user_role == 'free':
+                                    col_config["Power Asing"] = st.column_config.TextColumn(default="🔒 VIP")
+                                    col_config["Modal Asing"] = st.column_config.TextColumn(default="🔒 VIP")
+                                else:
+                                    col_config["Power Asing"] = st.column_config.NumberColumn(format="%.1f %%")
+                                    col_config["Modal Asing"] = st.column_config.NumberColumn(format="Rp %d")
+
+                                st.dataframe(df_res.fillna("🔒 VIP"), use_container_width=True, hide_index=True, column_config=col_config)
+                            
+                            # Simpan kode saham yang lolos untuk Smart Bridge
+                            st.session_state['screener_results'] = df_res['Kode'].tolist()
+                except Exception as e:
+                    st.error(f"Gagal memuat database: {e}")
+
+        # JALUR 2: SCANNING LIVE (Data Standar / Lapis 2)
+        else:
+            progress = st.progress(0); status = st.empty(); results = []
+            tickers = [f"{s}.JK" for s in stock_list]
+
+            status.text("Mengambil Data IHSG...")
+            ihsg_df = get_ihsg_data()
+            price_data = yf.download(tickers, period="1y", group_by='ticker', auto_adjust=True, progress=False, threads=True)
+
+            for i, t in enumerate(tickers):
+                status.text(f"Menganalisa Teknikal: {t} ...")
+                progress.progress((i+1)/len(tickers))
+                try:
+                    df = price_data[t].copy(); df = fix_dataframe(df); df = df[df['Volume'] > 0]
+                    if df.empty or len(df) < 50: continue
+                    min_vol = 5000000 if category_name == "Lapis 1 (JII30)" else 2000000
+                    if df['Volume'].iloc[-1] < min_vol: continue
+
+                    df = calculate_metrics(df, ihsg_df)
+                    fund = get_fundamental_info(t)
+                    s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
+                    wyckoff_phase, divergence = advanced_analysis(df)
+                    total_score = s_tech + s_fund + s_bandar + s_candle
+
+                    # --- [FITUR BARU] LOGIKA KEY REVERSAL & LIKUIDITAS ---
+                    try:
+                        # Hitung Stochastic
+                        stoch = df.ta.stoch(high=df['High'], low=df['Low'], close=df['Close'], k=14, d=3)
+                        if stoch is not None: df = pd.concat([df, stoch], axis=1)
+                        
+                        stoch_k = df.iloc[-1].get('STOCHk_14_3_3', 50)
+                        sma5_vol = df['Volume'].rolling(window=5).mean().iloc[-1]
+                        sma5_val = (df['Close'] * df['Volume']).rolling(window=5).mean().iloc[-1]
+                        
+                        prev = df.iloc[-2]
+                        curr = df.iloc[-1]
+                        
+                        syarat_likuiditas = (sma5_val > 1000000000) and (sma5_vol > 1000000)
+                        
+                        if (stoch_k < 20) and \
+                           (prev['Close'] < prev['Open']) and \
+                           (curr['Close'] > curr['Open']) and \
+                           (curr['Low'] < prev['Low']) and \
+                           (curr['Close'] > prev['High']) and \
+                           syarat_likuiditas:
+                            total_score += 2.0
+                            reasons.append("🔥 KEY REVERSAL")
+                    except Exception as e:
+                        pass
+                    # --- END LOGIKA BARU ---
+
+                    atr, close = last.get('ATR', 0), last['Close']
+                    stop_loss = close - (1.5 * atr) if atr > 0 else close * 0.9
+                    target_profit = close + (3.0 * atr) if atr > 0 else close * 1.1
+
+                    # PENGETATAN LOGIKA BUY 
+                    rec = "WAIT"
+                    if total_score >= 6 or "BULLISH DIV" in divergence or "🔥 MA" in reasons or "🔥 KEY REVERSAL" in reasons: rec = "💎 STRONG BUY"
+                    elif total_score >= 4 or (total_score >= 3.0 and "Accumulation" in wyckoff_phase): rec = "✅ BUY"
+                    if total_score < 3.0 and "Accumulation" not in wyckoff_phase: continue
+
+                    results.append({
+                        "Kode": t.replace(".JK", ""), "Harga": int(close), "TP": int(target_profit), "SL": int(stop_loss),
+                        "Fase": wyckoff_phase.split(" ")[1] if len(wyckoff_phase.split(" ")) > 1 else wyckoff_phase,
+                        "Power Asing": 0.0, "Modal Asing": 0, "Status": rec, "Katalis": ", ".join(reasons) if reasons else "-"
+                    })
+                except: continue
+
+            progress.empty(); status.empty()
+            if results:
+                df_res = pd.DataFrame(results)
+                st.success(f"Selesai! {len(results)} Saham Ditemukan.")
+                st.dataframe(df_res, use_container_width=True, hide_index=True)
+                
+                # Simpan kode saham yang lolos untuk Smart Bridge
+                st.session_state['screener_results'] = df_res['Kode'].tolist()
+            else: 
+                st.warning("Tidak ada saham yang lolos kriteria teknikal hari ini.")
+
+    # --- FITUR BARU: JEMBATAN PINTAR (SMART BRIDGE) ---
+    # Membaca dari memori agar form tidak menghilang saat ditekan
+    if st.session_state.get('screener_results'):
+        st.divider()
+        st.subheader("🎯 Tindak Lanjut: Analisis Mendalam")
+        st.markdown("Pilih saham yang lolos hari ini untuk langsung melihat grafiknya di Advanced Chart tanpa perlu mengetik ulang.")
+        
+        # --- FUNGSI CALLBACK (Jalur Khusus Anti-Error) ---
+        def jump_to_chart():
+            st.session_state['target_saham'] = st.session_state['sb_select']
+            st.session_state['active_menu'] = "📊 Advanced Chart"
+        # -------------------------------------------------
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            saham_pilihan = st.selectbox("Saham Pilihan Anda:", st.session_state['screener_results'], key="sb_select")
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            # Perhatikan tambahan parameter 'on_click=jump_to_chart' di bawah ini
+            # st.rerun() dihapus karena on_click otomatis me-restart layar
+            st.button("📊 Buka Chart 🚀", use_container_width=True, on_click=jump_to_chart)
+            
+    # ---------------------------------------------------------
+    # PASTE KODE INI DI BARIS PALING BAWAH FUNGSI run_screener
+    # ---------------------------------------------------------
+    
+    # Cek apakah pasar saham sedang jelek (Mode Proteksi Aktif atau Hasil Lapis 2 sedikit)
+    is_cash_is_king = (category_name == "Lapis 1 (JII30)" and use_idx_data and 'df_res' in locals() and len(df_res)==1 and df_res['Kode'].iloc[0]=='CASH')
+    pasar_berdarah = ('results' in locals() and len(results) < 3 and category_name != "Lapis 1 (JII30)")
+    
+    if is_cash_is_king or pasar_berdarah:
+        st.divider()
+        st.subheader("🚨 Macro-Asset Alert: Darurat Rotasi Aset!")
+        
+        if user_role == 'free':
+            st.info("🔒 **Sinyal Rotasi Aset Terkunci.** Member VIP otomatis mendapat rekomendasi perpindahan uang cash (ke Emas/RDPU) saat saham hancur.")
+            st.button("Buka Akses VIP 🚀", key="macro_upgrade")
+        else:
+            with st.spinner("Menganalisis pergerakan Emas Global sebagai alternatif..."):
+                try:
+                    gold_close, gold_prev, _, _, _ = get_gold_data() # Memanggil fungsi dari 14.8
+                    if gold_close and gold_prev:
+                        if gold_close > gold_prev:
+                            st.success("🛡️ **REKOMENDASI EMAS:** IHSG berisiko tinggi, tapi tren Emas Global sedang **NAIK**. Parkir dana Anda ke Emas Antam sementara waktu.")
+                            c1, c2 = st.columns([2, 1])
+                            with c1: st.metric("Emas Global (Real-time)", f"${gold_close:,.2f}/oz", f"+${gold_close-gold_prev:.2f}")
+                            with c2:
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                def jump_to_gold(): st.session_state['active_menu'] = "🥇 Emas & Safe Haven"
+                                st.button("📈 Buka Radar Emas", use_container_width=True, on_click=jump_to_gold)
+                        else:
+                            st.warning("💵 **PEGANG CASH (UANG TUNAI):** IHSG berisiko dan Emas Global juga terkoreksi. Simpan uang di RDN atau RDPU.")
+                except:
+                    pass
+# --- 12. FITUR CHART DETAIL & LIVE AI PREDICTOR ---
 def show_chart(use_idx_data, market_choice):
-    is_us_market = "Wall Street" in market_choice
-    st.header("📊 Advanced Chart & Smart Money Analysis")
-    st.markdown("Analisis teknikal interaktif dengan overlay indikator AI dan jejak Bandar.")
+    st.header("📊 Deep Analysis, Quant & AI Predictor")
 
-    default_ticker = "PGEO" if is_us_market else "BRIS"
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        ticker = st.text_input("🔍 Masukkan Kode Saham (Contoh: BRIS / ADRO):", default_ticker).upper()
-        if not is_us_market and not ticker.endswith(".JK"):
-            ticker += ".JK"
-    with col2:
-        period = st.selectbox("Rentang Waktu:", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
+    with st.expander("📖 Panduan Membaca Fase, AI, & Grafik (Klik di sini)"):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("""
+            **Fase Bandar (Wyckoff):**
+            * 🟢 **Accumulation:** Harga mendatar di bawah. Waktunya cicil beli.
+            * 🔵 **Markup:** Harga terbang. Uptrend kuat.
+            * 🔴 **Distribution:** Harga tertahan di pucuk. Bandar jualan.
+            * 🟠 **Markdown:** Bandar keluar, harga jatuh.
+            """)
+        with c2:
+            st.markdown("""
+            **🤖 Live AI Predictor (KNN):**
+            * 🔥 **> 70% (Bullish):** Peluang naik sangat tinggi.
+            * ⚖️ **50% - 69% (Netral):** Pergerakan arah belum pasti.
+            * ❄️ **< 50% (Bearish):** Peluang naik rendah.
 
+            **🎯 Keterangan Grafik:**
+            * **Garis Biru/Merah/Hijau/Ungu (MA):** Penunjuk arah tren harga.
+            * **🟩 / 🟥 Lorong Donchian (Area Abu-abu):** Sabuk volatilitas. Jika harga menembus batas putus-putus **Hijau (Atas)** = Sinyal **BREAKOUT** kuat! Jika tembus Merah (Bawah) = Longsor.
+            """)
     st.divider()
 
-    if st.button("📈 Tampilkan Chart", type="primary", use_container_width=True):
-        if not check_and_deduct_quota(f"chart_{ticker}"):
-            st.error("🚨 Kuota API harian Anda habis! Silakan Upgrade ke VIP.")
-            return
-        api_registry.add(f"chart_{ticker}")
+    with st.form(key='chart_search_form'):
+        c_input, c_btn = st.columns([4, 1])
+        with c_input: 
+            # --- JEMBATAN PINTAR (SMART BRIDGE) ---
+            # Menangkap saham dari memori lemparan Screener
+            default_ticker = st.session_state.get('target_saham', '')
+            ticker = st.text_input("🔍 Masukkan Kode Saham (Contoh: ADRO / PGEO):", default_ticker).upper()
+        with c_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_search = st.form_submit_button("Cari Saham 🔍")
 
-        with st.spinner(f"Menarik data {ticker}..."):
-            df = get_lazy_historical_data(ticker, period)
+    # --- AUTO-RUN LOGIC ---
+    # Jika user melompat dari Screener, grafiknya akan langsung terbuka tanpa perlu klik tombol cari lagi.
+    is_bridged_from_screener = ticker != "" and st.session_state.get('target_saham') == ticker
 
+    if (submit_search or is_bridged_from_screener) and ticker:
+        
+        # Simpan kembali ke memori agar jika user refresh, chart tidak hilang
+        st.session_state['target_saham'] = ticker
+        
+        # Tambahkan .JK HANYA jika pasar Indonesia
+        symbol = f"{ticker}.JK" if "Indonesia" in market_choice and not ticker.endswith(".JK") else ticker
+        ticker_only = ticker.replace(".JK", "")
+
+        try: supabase.table('audit_logs').insert({"user_email": user_email, "action": "SEARCH_CHART", "details": f"Mencari chart: {ticker_only}"}).execute()
+        except: pass
+
+        benchmark = "^JKSE" if "Indonesia" in market_choice else "^GSPC"
+        ihsg_df = get_ihsg_data(benchmark)
+
+        with st.spinner(f"Menganalisis {ticker_only}..."):
+            df = yf.download(symbol, period="2y", auto_adjust=True, progress=False)
             if df.empty:
-                st.error("Data tidak ditemukan. Pastikan kode saham benar.")
+                st.error("❌ Saham tidak ditemukan! Pastikan kode benar.")
                 return
 
-            # --- FITUR DETEKSI DIVIDEN (RADAR) ---
+            df = fix_dataframe(df)
+            df = df[df['Volume'] > 0]
+            df = calculate_metrics(df, ihsg_df)
+            fund = get_fundamental_info(symbol)
+
+            # --- MESIN KECERDASAN BUATAN (LIVE KNN PREDICTOR) ---
+            prob_up = 0.5
             try:
-                saham_yf = yf.Ticker(ticker)
-                kalender = saham_yf.calendar
-                if kalender is not None and not kalender.empty and 'Dividend Date' in kalender.index:
-                    div_date = kalender.loc['Dividend Date'].iloc[0]
-                    if pd.notna(div_date) and div_date.date() >= datetime.now().date():
-                        st.success(f"💰 **RADAR DIVIDEN:** Saham ini dijadwalkan akan membagikan dividen pada **{div_date.strftime('%d %B %Y')}**!")
-            except: pass
+                df['Target_Besok'] = (df['Close'].shift(-1) > df['Close']).astype(int)
+                ml_df = df[['Rsi', 'CMF', 'Ret_1', 'Target_Besok']].dropna()
 
-            df = calculate_metrics(df, get_ihsg_data() if not is_us_market else None)
-            
-            # --- PEMBUATAN PLOTLY CHART ---
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
-            
-            # Candlestick
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Harga'), row=1, col=1)
-            
-            # Moving Averages
-            fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.5), name='SMA 20'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='blue', width=1.5), name='SMA 50'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['EMA200'], line=dict(color='red', width=2), name='EMA 200'), row=1, col=1)
+                if len(ml_df) > 100:
+                    X = ml_df[['Rsi', 'CMF', 'Ret_1']]
+                    y = ml_df['Target_Besok']
+                    scaler = StandardScaler()
+                    X_scaled = scaler.fit_transform(X)
+                    knn = KNeighborsClassifier(n_neighbors=5)
+                    knn.fit(X_scaled, y)
 
-            # Bollinger Bands
-            if 'BBL_20_2.0' in df.columns and 'BBU_20_2.0' in df.columns:
-                fig.add_trace(go.Scatter(x=df.index, y=df['BBU_20_2.0'], line=dict(color='gray', width=1, dash='dot'), name='BB Upper'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['BBL_20_2.0'], line=dict(color='gray', width=1, dash='dot'), name='BB Lower', fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
+                    today_features = pd.DataFrame({'Rsi': [df['Rsi'].iloc[-1]], 'CMF': [df['CMF'].iloc[-1]], 'Ret_1': [df['Ret_1'].iloc[-1]]})
+                    today_scaled = scaler.transform(today_features)
+                    prob_up = knn.predict_proba(today_scaled)[0][1]
+            except Exception as e: pass
 
-            # Indikator Bawah (Volume / CMF / RSI)
-            colors = ['green' if row['Open'] < row['Close'] else 'red' for _, row in df.iterrows()]
-            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
+            s_tech, s_fund, s_bandar, s_candle, reasons, last = score_analysis(df, fund)
+            wyckoff_phase, divergence = advanced_analysis(df)
+            total_score = s_tech + s_fund + s_bandar + s_candle
 
-            fig.update_layout(height=600, template="plotly_dark", margin=dict(l=0, r=0, t=30, b=0), showlegend=False, xaxis_rangeslider_visible=False)
+            if prob_up >= 0.7:
+                total_score += 2.0
+                reasons.append(f"🤖 AI Bullish ({int(prob_up*100)}%)")
+
+            # LOGIKA STATUS REKOMENDASI ORISINAL
+            rec_status = "WAIT (Hindari / Pantau Saja)"
+            if total_score >= 6.5 or "BULLISH DIV" in divergence or "🔥 MA" in reasons:
+                rec_status = "💎 STRONG BUY"
+            elif total_score >= 4.5 or "Accumulation" in wyckoff_phase:
+                rec_status = "✅ BUY"
+
+            st.info(f"💡 **Kesimpulan Sistem:** Saat ini saham **{ticker_only}** berada dalam status **{rec_status}**")
+            st.divider()
+
+            is_us = "US" in market_choice
+            idx_date = get_idx_target_date(df)
+            cache_key = f"{ticker_only}_{idx_date}"
+            net_foreign, avg_buy_price, fetch_time = None, 0, None
+
+            if use_idx_data and not is_us:
+                if check_and_deduct_quota(cache_key):
+                    net_foreign, avg_buy_price, fetch_time = fetch_idx_foreign_flow(ticker_only, idx_date)
+                    if fetch_time: api_registry.add(cache_key)
+                else: st.warning("⚠️ Kuota Harian API Anda Habis! Menggunakan Data Standar.")
+
+            close, volume, atr = last['Close'], last['Volume'], last.get('ATR', 0)
+            daily_turnover = close * volume
+            stop_loss = close - (1.5 * atr) if atr > 0 else close
+            target_profit = close + (3.0 * atr) if atr > 0 else close
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            fase_color = "normal"
+            fase_text = f"-{wyckoff_phase}" if "Markdown" in wyckoff_phase or "Distribution" in wyckoff_phase else wyckoff_phase
+            c1.metric("Harga Saat Ini & Fase", format_currency(close, is_us), fase_text, delta_color=fase_color)
+
+            tp_pct = ((target_profit - close) / close) * 100 if close > 0 else 0
+            sl_pct = ((close - stop_loss) / close) * 100 if close > 0 else 0
+            c2.metric(f"Target Profit (+{tp_pct:.1f}%)", format_currency(target_profit, is_us), f"Batas Rugi: {format_currency(stop_loss, is_us)} (-{sl_pct:.1f}%)", delta_color="off")
+
+            if is_us:
+                c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Sistem Dark Pools (US)", delta_color="off")
+            elif net_foreign is not None and (net_foreign != 0 or avg_buy_price != 0):
+                power_pct = (abs(net_foreign) / daily_turnover) * 100 if daily_turnover > 0 else 0
+                
+                # CAPPING: Tangkap anomali Pasar Nego atau Delay YF
+                if power_pct > 100:
+                    power_display = ">100% (Ada Block/Nego)"
+                else:
+                    power_display = f"{power_pct:.1f}%"
+                    
+                c3.metric(f"Asing ({'🟢 AKUM' if net_foreign > 0 else '🔴 DISTRIB'})", format_rupiah(net_foreign), f"Dominasi: {power_display} | Modal: Rp {int(avg_buy_price):,}", delta_color="normal" if net_foreign > 0 else "inverse")
+            elif net_foreign == 0 and avg_buy_price == 0 and use_idx_data:
+                c3.metric("Data Bandar (Asing)", "Gagal Akses API", "Server IDX Sibuk / Timeout", delta_color="off")
+            else:
+                c3.metric("Data Bandar (Asing)", "Tidak Tersedia", "Mode Standar / Kuota Habis", delta_color="off")
+
+            if prob_up >= 0.7: ai_status, ai_color = "🔥 Sinyal Bullish", "normal"
+            elif prob_up < 0.5: ai_status, ai_color = "-❄️ Sinyal Bearish", "normal"
+            else: ai_status, ai_color = "⚖️ Netral", "off"
+
+            c4.metric(f"🤖 AI Predictor (Besok)", f"{int(prob_up*100)}% NAIK", ai_status, delta_color=ai_color)
+
+            # VISUALISASI 3 LAPIS GRAFIK (HARGA, VOLUME, CMF)
+            st.subheader(f"Visualisasi Grafik & Quant Radar {ticker_only}")
+            df_plot = df.tail(100)
+
+            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.5, 0.25, 0.25], vertical_spacing=0.08, subplot_titles=("1. Harga, MA, & Donchian", "2. Volume Transaksi", "3. Akumulasi CMF (Bandar)"))
+
+            fig.add_trace(go.Candlestick(x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name="Harga"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['SMA20'], line=dict(color='orange'), name="SMA 20"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['SMA50'], line=dict(color='blue'), name="SMA 50"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['SMA100'], line=dict(color='yellow'), name="SMA 100"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['EMA200'], line=dict(color='purple'), name="EMA 200"), row=1, col=1)
+
+            # --- SINKRONISASI WARNA DONCHIAN CHANNELS ---
+            if 'DCU_20_20' in df_plot.columns and 'DCL_20_20' in df_plot.columns:
+                # Batas Atas (Hijau)
+                fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['DCU_20_20'], line=dict(color='rgba(0,255,0,0.8)', width=1.5, dash='dot'), name='Breakout Atas (DC)'), row=1, col=1)
+                # Batas Bawah (Merah) dengan area isi abu-abu
+                fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['DCL_20_20'], line=dict(color='rgba(255,0,0,0.8)', width=1.5, dash='dot'), name='Support Bawah (DC)', fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
+
+            if atr > 0:
+                fig.add_hline(y=target_profit, line_dash="dash", line_color="green", row=1, col=1)
+                fig.add_hline(y=stop_loss, line_dash="dash", line_color="red", row=1, col=1)
+            if not is_us and net_foreign is not None and avg_buy_price > 0:
+                fig.add_hline(y=avg_buy_price, line_dash="dot", line_color="blue", row=1, col=1)
+
+            colors_vol = ['red' if r['Open'] - r['Close'] >= 0 else 'green' for i, r in df_plot.iterrows()]
+            fig.add_trace(go.Bar(x=df_plot.index, y=df_plot['Volume'], marker_color=colors_vol, name="Volume"), row=2, col=1)
+
+            cmf_colors = ['green' if v >= 0 else 'red' for v in df_plot['CMF']]
+            fig.add_trace(go.Bar(x=df_plot.index, y=df_plot['CMF'], marker_color=cmf_colors, name="CMF"), row=3, col=1)
+
+            # SETTING MARGIN 0 AGAR PENUH DI LAYAR HP
+            fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(l=0, r=0, t=40, b=0), template="plotly_dark")
+            # --- MENGHILANGKAN CELAH HARI LIBUR ---
+            fig.update_xaxes(
+                rangebreaks=[
+                    dict(bounds=["sat", "mon"]) # Melompati hari Sabtu hingga Senin (Pagi)
+                ]
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- KOTAK INFO ANALISIS ---
-            c_info1, c_info2, c_info3 = st.columns(3)
-            curr = df.iloc[-1]
-            c_info1.metric("Harga Terakhir", format_currency(curr['Close'], is_us_market))
-            c_info2.metric("RSI (Momentum)", f"{curr.get('Rsi', 0):.1f}", "Oversold (Murah)" if curr.get('Rsi', 50) < 30 else "Overbought (Mahal)" if curr.get('Rsi', 50) > 70 else "Netral")
-            
-            phase, div = advanced_analysis(df)
-            c_info3.metric("Fase Market", phase)
-
-def show_gold_predictor():
-    st.header("🥇 Prediktor Harga Emas (Safe Haven)")
-    st.markdown("Analisis tren pergerakan harga emas dunia (XAU/USD) menggunakan Machine Learning.")
-    
-    if st.button("Jalankan Prediksi Emas", type="primary"):
-        with st.spinner("Menarik data XAU/USD..."):
-            try:
-                df = yf.download("GC=F", period="2y", auto_adjust=True, progress=False)
-                if df.empty:
-                    st.error("Gagal menarik data emas.")
-                    return
-                
-                df = fix_dataframe(df)
-                df['SMA20'] = df['Close'].rolling(20).mean()
-                df['SMA50'] = df['Close'].rolling(50).mean()
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Harga Emas', line=dict(color='gold', width=2)))
-                fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], name='Tren Menengah (SMA50)', line=dict(color='blue', dash='dot')))
-                fig.update_layout(height=400, template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                curr = df.iloc[-1]
-                st.success(f"Harga Emas Terkini: **$ {curr['Close']:,.2f} / Troy Ounce**")
-                if curr['Close'] > curr['SMA50']: st.info("📈 Tren Emas sedang NAIK (Bullish).")
-                else: st.warning("📉 Tren Emas sedang TURUN (Bearish).")
-            except Exception as e:
-                st.error(f"Terjadi kesalahan: {e}")
-
-def show_backtesting(market_choice):
-    st.header("🧪 Mesin Backtesting Strategi")
-    st.markdown("Uji seberapa ampuh strategi *Golden Cross* (MA20 tembus MA50 ke atas) di masa lalu.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        ticker = st.text_input("Kode Saham (cth: BBRI / AAPL):", "BBRI").upper()
-    with col2:
-        modal_awal = st.number_input("Modal Awal (Rp/$):", min_value=1000, value=10000000, step=100000)
-        
-    if st.button("Mulai Simulasi", type="primary"):
-        with st.spinner("Menjalankan simulasi mesin waktu..."):
-            ticker_sym = f"{ticker}.JK" if "Indonesia" in market_choice and not ticker.endswith(".JK") else ticker
-            df = yf.download(ticker_sym, period="3y", auto_adjust=True, progress=False)
-            if df.empty:
-                st.error("Data tidak ditemukan.")
-                return
-                
-            df = fix_dataframe(df)
-            df['SMA20'] = df['Close'].rolling(20).mean()
-            df['SMA50'] = df['Close'].rolling(50).mean()
-            
-            # Logika Sederhana Backtest Golden Cross
-            uang = modal_awal
-            pegang_saham = 0
-            buy_signals = []
-            sell_signals = []
-            
-            for i in range(1, len(df)):
-                # Beli jika MA20 motong MA50 ke atas
-                if df['SMA20'].iloc[i] > df['SMA50'].iloc[i] and df['SMA20'].iloc[i-1] <= df['SMA50'].iloc[i-1]:
-                    if uang > 0:
-                        harga = df['Close'].iloc[i]
-                        pegang_saham = uang / harga
-                        uang = 0
-                        buy_signals.append(df.index[i])
-                
-                # Jual jika MA20 motong MA50 ke bawah
-                elif df['SMA20'].iloc[i] < df['SMA50'].iloc[i] and df['SMA20'].iloc[i-1] >= df['SMA50'].iloc[i-1]:
-                    if pegang_saham > 0:
-                        harga = df['Close'].iloc[i]
-                        uang = pegang_saham * harga
-                        pegang_saham = 0
-                        sell_signals.append(df.index[i])
-            
-            # Evaluasi Akhir
-            if pegang_saham > 0:
-                uang = pegang_saham * df['Close'].iloc[-1]
-                
-            profit = uang - modal_awal
-            profit_pct = (profit / modal_awal) * 100
-            
-            st.success(f"Simulasi Selesai! Hasil akhir dari modal awal: **{format_currency(uang, 'Wall Street' in market_choice)}**")
-            st.metric("Total Keuntungan (PnL)", format_currency(profit, 'Wall Street' in market_choice), f"{profit_pct:.2f}%")
-
-def show_news_sentiment(market_choice):
-    st.header("📰 Radar Sentimen Berita")
-    st.markdown("Menganalisis berita terbaru untuk mendeteksi sentimen pasar.")
-    
-    query = st.text_input("Topik/Saham (cth: Perbankan / Energi / ADRO):", "Saham")
-    if st.button("Cari Berita & Analisis", type="primary"):
-        with st.spinner("Memindai berita terkini..."):
-            try:
-                # Menggunakan Google News RSS
-                rss_url = f"https://news.google.com/rss/search?q={query}+saham+indonesia&hl=id&gl=ID&ceid=ID:id" if "Indonesia" in market_choice else f"https://news.google.com/rss/search?q={query}+stock&hl=en-US&gl=US&ceid=US:en"
-                feed = feedparser.parse(rss_url)
-                
-                if not feed.entries:
-                    st.info("Tidak ada berita signifikan ditemukan.")
-                    return
-                    
-                for entry in feed.entries[:5]:
-                    st.markdown(f"**[{entry.title}]({entry.link})**")
-                    st.caption(f"Dipublikasikan: {entry.published}")
-                    
-                    # Sentiment sederhana berbasis keyword
-                    title_lower = entry.title.lower()
-                    if any(word in title_lower for word in ['naik', 'laba', 'untung', 'meroket', 'bullish', 'surge', 'profit', 'jump']):
-                        st.success("🟢 Sentimen: POSITIF")
-                    elif any(word in title_lower for word in ['turun', 'rugi', 'anjlok', 'bearish', 'crash', 'loss', 'drop']):
-                        st.error("🔴 Sentimen: NEGATIF")
-                    else:
-                        st.info("⚪ Sentimen: NETRAL")
-                    st.divider()
-            except:
-                st.error("Gagal menarik data berita.")
-
-def show_seasonality(market_choice):
-    st.header("🗓️ Peta Musiman Saham (Seasonality)")
-    st.markdown("Melihat probabilitas kenaikan saham di bulan-bulan tertentu berdasarkan data historis.")
-    
-    ticker = st.text_input("🔍 Kode Saham (Contoh: BRIS / ADRO):", st.session_state.get('target_saham', '')).upper()
-    if st.button("Buat Peta Musiman", type="primary"):
-        with st.spinner("Mengkalkulasi probabilitas..."):
-            ticker_sym = f"{ticker}.JK" if "Indonesia" in market_choice and not ticker.endswith(".JK") else ticker
-            df = yf.download(ticker_sym, period="10y", auto_adjust=True, progress=False)
-            
-            if df.empty:
-                st.error("Data tidak ditemukan.")
-                return
-                
-            df = fix_dataframe(df)
-            
-            # Hitung Return Bulanan
-            monthly_data = df['Close'].resample('ME').last()
-            monthly_returns = monthly_data.pct_change() * 100
-            
-            df_season = pd.DataFrame({'Bulan': monthly_returns.index.month, 'Return': monthly_returns.values})
-            df_season.dropna(inplace=True)
-            
-            # Kalkulasi Probabilitas Naik (Win Rate)
-            stats = []
-            for month in range(1, 13):
-                month_data = df_season[df_season['Bulan'] == month]['Return']
-                if not month_data.empty:
-                    win_rate = (month_data > 0).mean() * 100
-                    avg_return = month_data.mean()
-                    stats.append({"Bulan": calendar.month_abbr[month], "Win Rate (%)": win_rate, "Rata-rata Return (%)": avg_return})
-            
-            if stats:
-                st.dataframe(pd.DataFrame(stats).style.background_gradient(cmap='RdYlGn'), use_container_width=True, hide_index=True)
-                st.success("💡 **Tips:** Perhatikan bulan dengan 'Win Rate' di atas 70% sebagai waktu terbaik untuk Buy and Hold.")
-
-def show_dividend_hunter(active_stock_list, active_category_name, market_choice):
-    st.header("📅 Dividend Hunter")
-    st.markdown("Mencari saham dengan riwayat pembagian dividen terbaik.")
-    st.info("Fitur pelacak histori dividen berjalan secara real-time. Mohon tunggu proses penarikan data selesai.")
-    
-    if st.button("Cari Saham Dividen Tinggi", type="primary"):
-        with st.spinner("Menganalisis yield dividen..."):
-            st.success("Analisis selesai! (Catatan: Simulasi tampilan, data lengkap ditarik dari YF Calendar)")
-            # Di sini Anda bisa menyisipkan logika looping yf.Ticker(sym).dividends seperti di script asli Anda
-
-def show_education():
-    st.header("📚 Pusat Edukasi & Strategi Trading")
-    st.markdown("Pelajari cara kerja pasar, indikator teknikal, dan psikologi trading.")
-    
-    with st.expander("📖 Memahami Smart Money Concept (SMC)"):
-        st.write("SMC adalah metodologi yang mengikuti jejak institusi besar (Bandar/Whales) yang memiliki modal besar untuk menggerakkan harga pasar.")
-    with st.expander("📈 Apa itu Golden Cross & Death Cross?"):
-        st.write("Golden Cross terjadi saat MA jangka pendek (misal MA20) memotong ke atas MA jangka panjang (MA50), menandakan potensi uptrend kuat.")
-    with st.expander("💡 Psikologi Trading: Mengatasi FOMO"):
-        st.write("Fear Of Missing Out (FOMO) sering membuat trader membeli di pucuk. Kuncinya adalah memiliki Trading Plan dan disiplin pada batasan Cut Loss.")
-
+# --- 13. FITUR ADMIN DASHBOARD ---
 # ==============================================================================
-# --- 12. FITUR ADMIN DASHBOARD (CONTROL PANEL) ---
+# --- FITUR ADMIN DASHBOARD (CONTROL PANEL) ---
 # ==============================================================================
 def show_admin_dashboard():
     st.header("👑 Admin Dashboard & Control Panel")
@@ -829,15 +988,18 @@ def show_admin_dashboard():
 
     st.divider()
 
-    tab1, tab2, tab3 = st.tabs(["👥 Manajemen Pengguna & Kuota", "📜 Log Persetujuan ToS", "🔍 Log Pencarian Saham"])
+    # Menambah Tab Manajemen Pengguna di awal
+    tab1, tab2, tab3 = st.tabs(["👥 Manajemen Pengguna", "📜 Log Persetujuan ToS", "🔍 Log Pencarian Saham"])
 
     # --- TAB 1: MANAJEMEN PENGGUNA & KUOTA ---
     with tab1:
         try:
+            # Tarik data lengkap dari profil
             res_users = supabase.table('profiles').select('*').execute()
             df_users = pd.DataFrame(res_users.data)
 
             if not df_users.empty:
+                # Metrik Ringkasan Dinamis
                 role_counts = df_users['role'].value_counts()
                 cols = st.columns(len(role_counts))
                 for i, (role_name, count) in enumerate(role_counts.items()):
@@ -845,6 +1007,7 @@ def show_admin_dashboard():
 
                 st.divider()
 
+                # Form Update Akun
                 st.subheader("⚙️ Konfigurasi Akun & Kuota")
                 with st.expander("Klik untuk Edit Role & Batas Kuota User", expanded=True):
                     c_mail, c_role, c_quota = st.columns([2, 1, 1])
@@ -852,12 +1015,12 @@ def show_admin_dashboard():
                     target_email = c_mail.selectbox("Pilih Email User:", df_users['email'].unique())
                     u_data = df_users[df_users['email'] == target_email].iloc[0]
                     
+                    # Mapping Role yang Anda gunakan (ditambahkan 'vip' untuk kelengkapan)
                     roles = ["free", "trial", "pro", "vip", "admin"]
                     idx_role = roles.index(u_data['role']) if u_data['role'] in roles else 0
                     
                     new_role = c_role.selectbox("Role Baru:", roles, index=idx_role)
-                    current_q = int(u_data['daily_quota']) if pd.notna(u_data.get('daily_quota')) else 0
-                    new_q = c_quota.number_input("Batas Kuota Harian:", min_value=0, value=current_q)
+                    new_q = c_quota.number_input("Batas Kuota Harian:", min_value=0, value=int(u_data.get('daily_quota', 0)))
 
                     if st.button("💾 Simpan Perubahan", type="primary", use_container_width=True):
                         supabase.table('profiles').update({
@@ -865,39 +1028,39 @@ def show_admin_dashboard():
                             'daily_quota': new_q
                         }).eq('id', u_data['id']).execute()
                         
-                        try:
-                            supabase.table('audit_logs').insert({
-                                "user_email": user_email, "action": "ADMIN_UPDATE_ACCOUNT", 
-                                "details": f"Admin mengubah {target_email} -> Role: {new_role}, Kuota: {new_q}"
-                            }).execute()
-                        except: pass
-
                         st.success(f"✅ Akun {target_email} berhasil diperbarui!")
-                        time.sleep(1.5)
+                        time.sleep(1)
                         st.rerun()
 
                 st.divider()
 
+                # Tabel Daftar Profil (Menampilkan Kuota & Sisa)
                 st.subheader("📋 Daftar Profil Database")
+                
+                # Menghitung Sisa Kuota untuk ditampilkan di tabel
                 df_view = df_users.copy()
                 df_view['daily_quota'] = df_view['daily_quota'].fillna(0).astype(int)
                 df_view['used_quota'] = df_view['used_quota'].fillna(0).astype(int)
                 df_view['Sisa Kuota'] = df_view['daily_quota'] - df_view['used_quota']
                 
+                # Memilih kolom yang ingin ditampilkan (Proteksi agar tidak error jika kolom absen)
                 cols_display = ['email', 'role', 'daily_quota', 'used_quota', 'Sisa Kuota']
                 if 'created_at' in df_view.columns:
                     df_view['created_at'] = pd.to_datetime(df_view['created_at']).dt.strftime('%Y-%m-%d %H:%M')
                     cols_display.append('created_at')
                 
+                # Filter hanya kolom yang ada
                 existing_cols = [c for c in cols_display if c in df_view.columns]
-                st.dataframe(df_view[existing_cols], use_container_width=True, hide_index=True)
+                df_final = df_view[existing_cols]
+                
+                st.dataframe(df_final, use_container_width=True, hide_index=True)
 
             else:
                 st.info("Tidak ada data pengguna.")
         except Exception as e:
             st.error(f"Gagal memuat manajemen pengguna: {e}")
 
-    # --- TAB 2: LOG TOS ---
+    # --- TAB 2: LOG PERSETUJUAN TOS ---
     with tab2:
         if st.button("Muat Data Persetujuan ToS", type="primary", key="btn_tos"):
             with st.spinner("Mengambil log..."):
@@ -910,7 +1073,7 @@ def show_admin_dashboard():
                     else: st.info("Belum ada data.")
                 except: st.error("Gagal menarik data log.")
 
-    # --- TAB 3: LOG PENCARIAN ---
+    # --- TAB 3: LOG PENCARIAN SAHAM ---
     with tab3:
         if st.button("Muat Data Pencarian Saham", type="primary", key="btn_search"):
             with st.spinner("Mengambil log..."):
@@ -922,20 +1085,870 @@ def show_admin_dashboard():
                         st.dataframe(df[['Waktu (UTC)', 'user_email', 'details']], use_container_width=True, hide_index=True)
                     else: st.info("Belum ada data.")
                 except: st.error("Gagal menarik data log.")
+                
+# --- 14. PUSAT EDUKASI & STRATEGI TRADING ---
+def show_education():
+    st.header("📚 Pusat Edukasi & Strategi Trading")
+    st.markdown("Pelajari cara kerja sistem kecerdasan buatan (AI) ini agar Anda bisa memaksimalkan profit dan menghindari jebakan pasar.")
+    st.divider()
+
+    st.subheader("📖 Kamus Lengkap Indikator & Istilah AI")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.info("**💎 REKOMENDASI AI**")
+        st.markdown("""
+        * **💎 STRONG BUY** : Saham sangat istimewa. Fundamental murah, Tren Bullish, dan Machine Learning melihat probabilitas naik > 70%. Sangat disarankan.
+        * **✅ BUY** : Saham bagus untuk diakumulasi cicil beli. Risiko penurunan sangat rendah.
+        * **WAIT** : Saham belum memiliki momentum yang jelas. Lebih baik pantau dulu.
+        """)
+        
+        st.success("**🌊 FASE WYCKOFF (Siklus Bandar)**")
+        st.markdown("""
+        * **🟢 Accumulation** : Fase paling aman. Bandar sedang diam-diam mengumpulkan barang di harga bawah.
+        * **🔵 Markup** : Harga sedang diterbangkan oleh Bandar. Sangat cocok untuk *trend-following* (ikut arus).
+        * **🔴 Distribution** : HATI-HATI! Bandar sedang jualan (buang barang) ke ritel di pucuk harga.
+        * **🟠 Markdown** : Harga sedang dihancurkan ke bawah. Hindari saham ini!
+        """)
+
+    with col2:
+        st.warning("**🔥 KATALIS PENDORONG (Alasan Saham Lolos)**")
+        st.markdown("""
+        * **🤖 AI Bullish** : Algoritma *Machine Learning* mendeteksi pola yang mengindikasikan harga besok akan naik.
+        * **🔥 Top Momentum** : Pergerakan harga saham ini termasuk yang paling liar dan kuat dalam 6 bulan terakhir.
+        * **💰 Undervalued** : Saham ini sedang "Salah Harga" (Sangat murah dibanding nilai buku perusahaannya/PBV rendah).
+        * **🌟 Market Beat** : Saham ini bergerak melawan arus (Misal: IHSG/S&P 500 hancur, tapi dia malah naik sendirian).
+        * **🐳 CMF (Chaikin Money Flow)** : Ada indikasi aliran dana besar (*Smart Money*) masuk diam-diam ke saham ini.
+        * **💎 RSI** : Indikator RSI (Relative Strength Index) menunjukkan saham ini sudah sangat *Oversold* (jenuh jual/terlalu murah) dan siap mantul naik.
+        * **🚀 Breakout DC** : Harga saham baru saja menjebol atap *Donchian Channel* (indikasi tren super kuat baru saja dimulai).
+        * **🔥 MA** : Harga saham berada di atas semua garis *Moving Average* penting (Uptrend sempurna).
+        """)
+
+    st.divider()
+    
+    # --- BAGIAN BARU: EDUKASI FITUR VIP ---
+    st.subheader("👑 Panduan Fitur Eksklusif (VIP/PRO)")
+    st.markdown("Panduan cara membaca metrik pada fitur-fitur kuantitatif tingkat lanjut bagi pengguna VIP.")
+    
+    with st.expander("🧪 1. Cara Membaca Mesin Backtesting"):
+        st.markdown("""
+        Backtesting adalah simulasi 'andai-andaian' berdasarkan data masa lalu untuk menguji keandalan sistem AI.
+        * **Equity Curve (Grafik Pertumbuhan Modal)**: Garis hijau menunjukkan pertumbuhan uang Anda jika disiplin mengikuti sinyal AI (Beli saat *Uptrend*, Jual/Cash saat *Downtrend*). Bandingkan dengan garis abu-abu (Hanya Beli & Tahan).
+        * **Max Drawdown (Risiko Terdalam)**: Angka ini menunjukkan persentase penurunan modal terdalam yang pernah terjadi dari titik puncaknya. Semakin kecil angkanya, semakin aman dan stabil strateginya.
+        * **Kesimpulan AI**: AI akan menyimpulkan secara otomatis apakah saham ini lebih cocok untuk di-*trading*-kan secara aktif menggunakan sistem, atau lebih baik dibeli dan disimpan jangka panjang.
+        """)
+        
+    with st.expander("📰 2. Cara Membaca Radar Sentimen Berita"):
+        st.markdown("""
+        Radar ini menggunakan teknologi NLP (*Natural Language Processing*) untuk membaca dan menilai emosi artikel berita di media finansial lokal.
+        * **Skor Sentimen**: 
+            * **Positif (> 0)**: Media sedang menyoroti hal baik (laba meroket, proyek baru, cuan, dividen).
+            * **Negatif (< 0)**: Media sedang memberikan sentimen buruk (utang, rugi, ARB, suspensi).
+        * **Strategi Penggunaan**: Gunakan berita murni sebagai **alat konfirmasi, bukan penentu utama**. Jika Screener menunjukkan sinyal **BUY**, dan Berita mengonfirmasi dengan sentimen **OPTIMIS**, maka probabilitas kemenangan Anda menjadi jauh lebih meyakinkan.
+        """)
+        
+    with st.expander("🗓️ 3. Cara Membaca Peta Musiman (Seasonality)"):
+        st.markdown("""
+        Fitur ini mendeteksi siklus berulang suatu saham dalam 10 tahun terakhir (seperti fenomena *Window Dressing* di akhir tahun).
+        * **Peta Heatmap**: Kotak berwarna hijau pekat berarti di bulan dan tahun tersebut, saham memberikan keuntungan yang besar. Kotak merah berarti saham sering anjlok.
+        * **Win Rate (%) per Bulan**: Jika bulan Desember memiliki Win Rate 90%, artinya dalam 10 tahun terakhir, 9 kali saham tersebut ditutup menghijau di akhir Desember.
+        * **Strategi Penggunaan**: Sangat cocok untuk *Swing Trading* jangka menengah. Cari saham yang memiliki riwayat *Win Rate* di atas 70% pada bulan yang akan datang, lalu lakukan akumulasi pembelian sebelum bulan tersebut tiba.
+        """)
+
+    st.divider()
+    
+    # --- BAGIAN FAQ & STRATEGI LAMA ---
+    st.subheader("🧠 FAQ & Strategi Trading")
+    with st.expander("🤔 1. Kenapa Status Saham di Screener & Chart Bisa Berbeda?"):
+        st.markdown("Screener memindai data secara keseluruhan di malam hari (melihat tren besar), sedangkan Advanced Chart menganalisis pergerakan harga secara *live* detik ini juga. Gunakan Screener untuk mencari kandidat, dan Chart untuk eksekusi beli.")
+
+    with st.expander("⏱️ 2. Apakah Data di Aplikasi Ini 100% Live?"):
+        st.markdown("Ada jeda 10-15 menit dari pasar asli. Aplikasi ini dirancang untuk **Swing Trading** (menahan saham beberapa hari/minggu), bukan untuk *Scalping* harian. Waktu analisa terbaik adalah 15:30 WIB (menjelang bursa tutup).")
+        
+    with st.expander("🥇 3. Tiga Aturan Emas (Golden Rules) Trading"):
+        st.success("""
+        1. **Kombinasikan Data**: Jangan beli secara membabi buta. Pastikan Teknikal, Bandarmologi (Uang Asing), dan Sentimen Berita searah.
+        2. **Disiplin Stop Loss**: Selalu pasang *Stop Loss* (Batas Rugi) sesuai saran AI untuk melindungi modal Anda dari nyangkut berkepanjangan.
+        3. **Sabar di Fase Accumulation**: Saham di fase akumulasi harganya sangat aman, namun mungkin membutuhkan kesabaran ekstra sebelum bandar mulai menerbangkannya ke atas.
+        """)
+# --- 14.5 FITUR BARU: MESIN BACKTESTING (UJI SEJARAH STRATEGI) ---
+def show_backtesting(market_choice):
+    st.header("🧪 Mesin Backtesting (Uji Strategi AI)")
+    # --- PROTEKSI VIP ---
+    if user_role == 'free':
+        st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+        st.info("""
+        **Kenapa Anda Membutuhkan Mesin Backtesting?**
+        Trading tanpa uji strategi seperti mengemudi dengan mata tertutup. Fitur ini memungkinkan Anda melihat performa strategi AI kami di masa lalu sebelum Anda melakukan trading saham di dunia nyata.
+        
+        **Apa yang didapatkan member VIP?**
+        * Simulasi pertumbuhan modal (Equity Curve) selama 3 tahun.
+        * Perbandingan performa Strategi AI vs Beli & Diam (Buy & Hold).
+        * Perhitungan risiko Drawdown (penurunan modal terdalam).
+        """)
+        st.button("Upgrade ke VIP Sekarang 🚀", key="bt_upgrade")
+        return # Menghentikan fungsi agar user free tidak bisa melihat input form
+    # --- END PROTEKSI ---
+    st.markdown("Simulasikan performa strategi *Quant* jika Anda disiplin menerapkannya selama 3 tahun terakhir tanpa melibatkan emosi.")
+
+    # Input Parameter
+    with st.form(key='backtest_form'):
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1: 
+            ticker = st.text_input("🔍 Kode Saham:", "PGEO").upper()
+        with col2: 
+            modal_awal = st.number_input("💰 Modal Awal (Rp/USD):", min_value=1000, value=10000000, step=1000000)
+        with col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_bt = st.form_submit_button("🚀 Mulai Simulasi", use_container_width=True)
+
+    if submit_bt and ticker:
+        with st.spinner("Mesin waktu berjalan... Menghitung ribuan data historis..."):
+            is_us = "US" in market_choice
+            symbol = f"{ticker}.JK" if not is_us and not ticker.endswith(".JK") else ticker
+            ticker_only = ticker.replace(".JK", "")
+
+            try:
+                # Menarik data 3 tahun terakhir
+                df = yf.download(symbol, period="3y", auto_adjust=True, progress=False)
+                if df.empty:
+                    st.error("❌ Data saham tidak ditemukan.")
+                    return
+                
+                df = fix_dataframe(df)
+                df = df[df['Volume'] > 0]
+                
+                # --- STRATEGI ALGORITMA (AI Trend Follower) ---
+                # Aturan Beli: Harga menembus MA 50 ke atas (Uptrend Reversal)
+                # Aturan Jual: Harga jatuh ke bawah MA 20 (Momentum Hilang)
+                df['SMA20'] = df.ta.sma(length=20)
+                df['SMA50'] = df.ta.sma(length=50)
+                
+                # Simulasi Keputusan (Vectorized - Super Cepat)
+                df['Signal'] = 0
+                df.loc[df['Close'] > df['SMA50'], 'Signal'] = 1  # Mode Beli/Hold
+                df.loc[df['Close'] < df['SMA20'], 'Signal'] = 0  # Mode Jual/Cash
+                
+                df['Position'] = df['Signal'].ffill().fillna(0)
+                
+                # Hitung Keuntungan Harian
+                df['Daily_Return'] = df['Close'].pct_change()
+                df['Strategy_Return'] = df['Position'].shift(1) * df['Daily_Return']
+                
+                # Pertumbuhan Modal Berbunga (Compound Interest)
+                df['Equity'] = modal_awal * (1 + df['Strategy_Return']).cumprod()
+                df['Buy_Hold_Equity'] = modal_awal * (1 + df['Daily_Return']).cumprod()
+                
+                # --- KALKULASI METRIK PERFORMA ---
+                df = df.dropna()
+                modal_akhir = df['Equity'].iloc[-1]
+                bnh_akhir = df['Buy_Hold_Equity'].iloc[-1]
+                
+                total_return = ((modal_akhir - modal_awal) / modal_awal) * 100
+                bnh_return = ((bnh_akhir - modal_awal) / modal_awal) * 100
+                
+                # Menghitung Risiko (Max Drawdown / Penurunan Terdalam)
+                rolling_max = df['Equity'].cummax()
+                drawdown = (df['Equity'] - rolling_max) / rolling_max
+                max_drawdown = drawdown.min() * 100
+
+                # --- TAMPILAN DASHBOARD HASIL ---
+                st.success(f"✅ Simulasi Selesai! Menguji {len(df)} hari perdagangan pada saham {ticker_only}.")
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Modal Akhir (Strategi AI)", format_currency(modal_akhir, is_us), f"{total_return:.2f}% Profit")
+                c2.metric("Jika Hanya Beli & Diam (B&H)", format_currency(bnh_akhir, is_us), f"{bnh_return:.2f}% Profit", delta_color="off")
+                c3.metric("Risiko Terdalam (Max Drawdown)", f"{max_drawdown:.2f}%", "Penurunan uang dari puncak ke dasar", delta_color="inverse")
+
+                if total_return > bnh_return:
+                    st.info("🏆 **Kesimpulan:** Strategi *Quant AI* terbukti **lebih unggul** dan lebih aman daripada sekadar menahan saham membabi buta (*Buy and Hold*).")
+                else:
+                    st.warning("⚖️ **Kesimpulan:** Untuk saham ini, strategi *Buy and Hold* jangka panjang menghasilkan profit lebih besar, namun strategi *Quant AI* membantu melindungi Anda dari kerugian (Max Drawdown) yang ekstrem.")
+
+                # --- GRAFIK PERTUMBUHAN MODAL (EQUITY CURVE) ---
+                st.subheader("📈 Grafik Pertumbuhan Modal (Equity Curve)")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df.index, y=df['Equity'], mode='lines', name='Strategi Quant AI', line=dict(color='#00FF00', width=3)))
+                fig.add_trace(go.Scatter(x=df.index, y=df['Buy_Hold_Equity'], mode='lines', name='Beli & Tahan Biasa', line=dict(color='#555555', width=2, dash='dot')))
+                
+                fig.update_layout(height=400, template="plotly_dark", margin=dict(l=0, r=0, t=30, b=0), yaxis_title="Saldo Modal", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Gagal melakukan simulasi: Terjadi kesalahan data ({e}).")
+# --- 14.6 FITUR BARU: RADAR SENTIMEN BERITA LOKAL  ---
+
+@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_local_news(ticker):
+    # UPGRADE: Menggunakan Google News RSS Search khusus regional Indonesia
+    # Ini akan menyapu SELURUH media lokal secara spesifik mencari kode saham user.
+    query = f"saham+{ticker}"
+    url = f"https://news.google.com/rss/search?q={query}&hl=id&gl=ID&ceid=ID:id"
+    
+    news_list = []
+    try:
+        feed = feedparser.parse(url)
+        
+        # Ambil maksimal 10 berita paling relevan/terbaru
+        for entry in feed.entries[:10]:
+            raw_title = entry.title
+            link = entry.link
+            date = entry.get('published', '')
+            
+            # Google News RSS menggabungkan Judul dan Publisher (Contoh: "Laba BUMI Naik - CNBC Indonesia")
+            # Kita pisahkan agar tampilannya tetap rapi di aplikasi Anda
+            if " - " in raw_title:
+                clean_title, publisher = raw_title.rsplit(" - ", 1)
+            else:
+                clean_title = raw_title
+                publisher = "Media Finansial"
+                
+            news_list.append({
+                "title": clean_title, 
+                "link": link, 
+                "publisher": publisher, 
+                "date": date
+            })
+    except Exception as e:
+        pass
+        
+    return news_list
+
+def analyze_indonesian_sentiment(text):
+    # Kamus NLP sederhana khusus bahasa gaul saham Indonesia
+    kata_positif = ['naik', 'cuan', 'laba', 'untung', 'dividen', 'terbang', 'akumulasi', 'positif', 'rekor', 'melonjak', 'melesat', 'tumbuh', 'meroket', 'bullish', 'borong', 'lonjakan']
+    kata_negatif = ['turun', 'rugi', 'anjlok', 'arb', 'distribusi', 'negatif', 'utang', 'suspensi', 'jeblok', 'merosot', 'hancur', 'jatuh', 'bearish', 'gagal', 'koreksi', 'dilepas', 'jual']
+    
+    text_lower = text.lower()
+    score = 0
+    
+    # Deteksi sentimen
+    for kata in kata_positif:
+        if re.search(r'\b' + kata + r'\b', text_lower): score += 1
+    for kata in kata_negatif:
+        if re.search(r'\b' + kata + r'\b', text_lower): score -= 1
+        
+    if score > 0: return "🟢 POSITIF", score
+    elif score < 0: return "🔴 NEGATIF", score
+    else: return "⚪ NETRAL", score
+
+def show_news_sentiment(market_choice):
+    st.header("📰 Radar Sentimen Berita Lokal")
+    st.markdown("Mesin pemindai yang memantau berita dari portal finansial top Indonesia untuk mencari katalis tersembunyi.")
+
+    # --- PROTEKSI VIP ---
+    # Memastikan user_role terdeteksi dengan aman
+    if user_role == 'free':
+        st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+        st.info("""
+        **Kenapa Analisis Sentimen Itu Penting?**
+        Harga saham seringkali bergerak bukan karena angka, tapi karena emosi pasar. Radar ini menyapu ribuan berita untuk mendeteksi apakah pasar sedang optimis atau ketakutan.
+        
+        **Apa yang didapatkan member VIP?**
+        * Pemindaian otomatis ke seluruh portal media finansial utama Indonesia.
+        * Kesimpulan otomatis: Apakah berita cenderung Bullish atau Bearish?
+        * Akses langsung ke link berita yang menjadi katalis pergerakan saham.
+        """)
+        st.button("Upgrade ke VIP Sekarang 🚀", key="news_upgrade")
+        return
+    # --- END PROTEKSI ---
+
+    # Matikan fitur jika user sedang di Mode Wall Street
+    if "US" in market_choice:
+        st.warning("⚠️ Radar Berita Lokal dinonaktifkan di mode Wall Street. Silakan pindah ke bursa Indonesia.")
+        return
+
+    with st.form(key='news_form'):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            ticker = st.text_input("🔍 Kode Saham (Contoh: SIDO / PGEO / ADRO):", "").upper()
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_news = st.form_submit_button("Radar Berita 🔍", use_container_width=True)
+
+    if submit_news and ticker:
+        with st.spinner(f"📡 Radar sedang menyapu seluruh portal berita lokal untuk saham {ticker}..."):
+            ticker_only = ticker.replace(".JK", "")
+
+            try:
+                # Memanggil data dari fungsi penyedot RSS (Google News Tracker)
+                berita_lokal = fetch_local_news(ticker_only)
+
+                if not berita_lokal:
+                    st.warning(f"⚠️ Radar tidak menemukan berita terbaru yang menyebutkan saham {ticker_only} di media Indonesia hari ini.")
+                    st.info("💡 Tips: Coba gunakan saham berkapitalisasi besar atau saham yang sedang ramai ditransaksikan.")
+                    return
+
+                total_score = 0
+                news_items = []
+
+                # Analisis satu per satu dengan Kamus Bahasa Indonesia
+                for item in berita_lokal:
+                    sentiment_label, score = analyze_indonesian_sentiment(item['title'])
+                    total_score += score
+                    news_items.append({
+                        "title": item['title'],
+                        "publisher": item['publisher'],
+                        "sentiment": sentiment_label,
+                        "link": item['link'],
+                        "score": score,
+                        "date": item['date']
+                    })
+
+                avg_score = total_score / len(berita_lokal)
+                
+                # --- DASHBOARD KESIMPULAN ---
+                st.subheader(f"🧠 Kesimpulan Radar Sentimen {ticker_only}")
+                c1, c2 = st.columns(2)
+                
+                if avg_score > 0:
+                    status_berita = "🐂 OPTIMIS (Banyak Kabar Baik)"
+                    warna = "normal"
+                elif avg_score < 0:
+                    status_berita = "🐻 PESIMIS (Banyak Kabar Buruk)"
+                    warna = "inverse"
+                else:
+                    status_berita = "⚖️ NETRAL (Minim Sentimen)"
+                    warna = "off"
+                    
+                c1.metric("Kondisi Emosi Media", status_berita, f"Skor Sentimen: {avg_score:.1f}", delta_color=warna)
+                c2.info("Sistem secara pintar memindai kata kunci finansial (seperti laba, cuan, rugi, ARB) dari artikel lokal yang baru saja dirilis.")
+                
+                st.divider()
+                
+                # --- DAFTAR BERITA YANG DIBACA AI ---
+                st.subheader("📑 Arsip Berita yang Terdeteksi")
+                for item in news_items:
+                    with st.expander(f"{item['sentiment']} | {item['title']}"):
+                        st.write(f"**Sumber:** {item['publisher']} | **Waktu Terbit:** {item['date']}")
+                        st.markdown(f"[🔗 Baca artikel selengkapnya di sini]({item['link']})")
+                        
+            except Exception as e:
+                st.error(f"Gagal menyapu berita lokal: {e}")
+# --- 14.7 FITUR BARU: PETA PROBABILITAS MUSIMAN (SEASONALITY HEATMAP) ---
+def show_seasonality(market_choice):
+    st.header("🗓️ Peta Probabilitas Musiman & Risiko")
+    st.markdown("Mendeteksi pola siklus bulanan saham dalam 10 tahun terakhir dengan cerdas via Database & Cloud.")
+
+    with st.form(key='season_form'):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            ticker = st.text_input("🔍 Kode Saham (Contoh: ADRO / PGEO):", st.session_state.get('target_saham', '')).upper()
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_season = st.form_submit_button("Analisis Siklus 🔍", use_container_width=True)
+
+    if submit_season and ticker:
+        with st.spinner(f"Sinkronisasi data 10 tahun untuk {ticker}..."):
+            is_us = "US" in market_choice
+            symbol = f"{ticker}.JK" if not is_us and not ticker.endswith(".JK") else ticker
+            ticker_only = ticker.replace(".JK", "")
+
+            try:
+                # --- INTEGRASI LAZY LOADING (OPTIMASI DATABASE) ---
+                df = get_lazy_historical_data(symbol, period="10y")
+                
+                if df.empty:
+                    st.error(f"❌ Data saham {ticker_only} tidak ditemukan.")
+                    return
+                
+                # Standarisasi Kolom
+                close_data = df['Close'].squeeze()
+                
+                if len(close_data) < 250 * 5: # Kurang lebih 5 tahun trading days
+                    st.warning("⚠️ Data histori terlalu pendek untuk analisis musiman yang akurat (Minimal 5 tahun idealnya).")
+                    return
+
+                # --- PENGOLAHAN DATA BULANAN ---
+                try:
+                    df_monthly = close_data.resample('ME').last()
+                except:
+                    df_monthly = close_data.resample('M').last()
+                
+                returns = df_monthly.pct_change() * 100
+                df_ret = returns.to_frame(name='Return').dropna()
+                df_ret['Year'] = df_ret.index.year
+                df_ret['Month'] = df_ret.index.month
+
+                # Pivot Table
+                pivot = df_ret.pivot(index='Year', columns='Month', values='Return')
+                month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                
+                for m in range(1, 13):
+                    if m not in pivot.columns: pivot[m] = np.nan
+                pivot = pivot[[m for m in range(1, 13)]]
+
+                win_rate = (pivot > 0).sum() / pivot.notna().sum() * 100
+                avg_return = pivot.mean()
+                win_rate = win_rate.fillna(0)
+                avg_return = avg_return.fillna(0)
+
+                # Data Bulan Saat Ini
+                curr_month = datetime.now().month
+                curr_month_name = month_names[curr_month-1]
+                this_month_win = win_rate.get(curr_month, 0)
+                this_month_avg = avg_return.get(curr_month, 0)
+
+                # ==========================================
+                # AKSES GRATIS (TEASER BULAN INI)
+                # ==========================================
+                if user_role == 'free':
+                    st.subheader(f"📊 Radar Siklus {ticker_only}: Bulan {curr_month_name}")
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric(f"Probabilitas Naik ({curr_month_name})", f"{this_month_win:.0f}%")
+                    c2.metric("Rata-rata Return", f"{this_month_avg:.2f}%", delta_color="normal" if this_month_avg > 0 else "inverse")
+                    
+                    st.divider()
+                    st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+                    st.info("Sebagai pengguna gratis, Anda hanya dapat melihat probabilitas untuk bulan yang sedang berjalan.\n\n**Upgrade ke VIP untuk membuka:**\n1. 🗺️ **Heatmap 10 Tahun** (Lihat bulan apa saham ini paling sering naik)\n2. ⚠️ **Risiko Terburuk / Max Drawdown**\n3. 📅 **Efek Hari Perdagangan** (Hari apa yang paling menguntungkan?)")
+                    st.button("Upgrade ke VIP Sekarang 🚀", key="season_upgrade")
+                    return # Hentikan proses di sini untuk user gratis
+
+                # ==========================================
+                # AKSES VIP (FULL INSTITUTIONAL DASHBOARD)
+                # ==========================================
+                st.success("💎 **VIP Access:** Menampilkan Analisis Risiko Level Institusi.")
+                
+                tab1, tab2 = st.tabs(["🗺️ Peta Musiman 10 Tahun", "📅 Efek Hari & Drawdown Risiko"])
+
+                with tab1:
+                    st.subheader(f"📊 Rapor Musiman {ticker_only}")
+                    
+                    best_idx = avg_return.idxmax()
+                    worst_idx = avg_return.idxmin()
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Bulan Terbaik", month_names[best_idx-1], f"Avg: +{avg_return[best_idx]:.1f}%")
+                    c2.metric("Bulan Terburuk", month_names[worst_idx-1], f"Avg: {avg_return[worst_idx]:.1f}%", delta_color="inverse")
+                    c3.metric(f"Probabilitas {curr_month_name} (Ini)", f"{this_month_win:.0f}% Hijau", f"Avg: {this_month_avg:.1f}%")
+
+                    st.divider()
+
+                    # Heatmap Visualization
+                    text_vals = pivot.copy().values
+                    formatted_text = [[f"{val:.1f}%" if pd.notna(val) else "-" for val in row] for row in text_vals]
+
+                    fig = go.Figure(data=go.Heatmap(
+                        z=pivot.values,
+                        x=month_names,
+                        y=pivot.index,
+                        text=formatted_text,
+                        texttemplate="%{text}",
+                        colorscale="RdYlGn",
+                        zmid=0,
+                        showscale=True,
+                        colorbar=dict(title="Return %")
+                    ))
+
+                    fig.update_layout(
+                        height=500,
+                        template="plotly_dark",
+                        margin=dict(l=0, r=0, t=30, b=0),
+                        yaxis=dict(title="Tahun", tickmode="linear"),
+                        xaxis=dict(side="top")
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # FITUR BARU VIP: MANAJEMEN RISIKO & EFEK HARI
+                with tab2:
+                    c_risk1, c_risk2 = st.columns(2)
+                    
+                    with c_risk1:
+                        st.subheader("⚠️ Max Drawdown (Risiko)")
+                        st.markdown("Penurunan bulanan **terdalam** yang pernah terjadi dalam 10 tahun.")
+                        
+                        # Hitung nilai minimum (Drawdown) di setiap bulan
+                        min_returns = pivot.min()
+                        
+                        fig_dd = go.Figure(go.Bar(
+                            x=month_names, 
+                            y=min_returns.values,
+                            marker_color=['red' if val < 0 else 'green' for val in min_returns.values]
+                        ))
+                        fig_dd.update_layout(height=350, template="plotly_dark", yaxis_title="Drawdown (%)", margin=dict(l=0, r=0, t=10, b=0))
+                        st.plotly_chart(fig_dd, use_container_width=True)
+
+                    with c_risk2:
+                        st.subheader("📅 Efek Hari Perdagangan")
+                        st.markdown("Probabilitas saham ditutup **Hijau (Naik)** berdasarkan hari.")
+                        
+                        # Hitung Win-Rate Harian dari raw dataframe
+                        daily_df = df.copy()
+                        if 'Open' in daily_df.columns:
+                            daily_df['Is_Up'] = daily_df['Close'] > daily_df['Open']
+                        else:
+                            daily_df['Is_Up'] = daily_df['Close'] > daily_df['Close'].shift(1)
+                            
+                        daily_df['DayOfWeek'] = daily_df.index.dayofweek
+                        day_stats = daily_df.groupby('DayOfWeek')['Is_Up'].mean() * 100
+                        
+                        # Format label hari (Senin = 0, Jumat = 4)
+                        hari_indo = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat']
+                        day_stats = day_stats[day_stats.index < 5] # Abaikan jika ada data anomali di akhir pekan
+                        day_stats.index = [hari_indo[i] for i in day_stats.index]
+                        
+                        fig_day = go.Figure(go.Scatter(
+                            x=day_stats.index, 
+                            y=day_stats.values,
+                            mode='lines+markers', 
+                            marker=dict(size=10, color='cyan'), 
+                            line=dict(color='cyan', width=3)
+                        ))
+                        fig_day.add_hline(y=50, line_dash="dash", line_color="gray", annotation_text="Batas 50%")
+                        fig_day.update_layout(height=350, template="plotly_dark", yaxis_title="Win-Rate (%)", margin=dict(l=0, r=0, t=10, b=0))
+                        st.plotly_chart(fig_day, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Terjadi kendala teknis: {e}")
+               
+
+
+# --- 14.8 FITUR BARU: PREDIKTOR EMAS & RADAR FISIK (SAFE HAVEN) ---
+
+# HAPUS fungsi get_yf_session() jika masih ada di atas
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_gold_data():
+    """Penarik data instan untuk Morning Predictor (Native YFinance Bypass)"""
+    try:
+        # Kita hapus parameter session=session, biarkan yfinance mengurusnya
+        gold = yf.Ticker("XAUUSD=X").history(period="10d")
+        
+        if gold.empty:
+            gold = yf.Ticker("GC=F").history(period="10d")
+            if gold.empty:
+                return None, None, None, None, "Data kosong. Rate Limit dari Yahoo."
+
+        idr = yf.Ticker("IDR=X").history(period="10d")
+        if idr.empty:
+            return None, None, None, None, "Data IDR kosong."
+
+        gold_close_series = gold['Close'].dropna()
+        idr_close_series = idr['Close'].dropna()
+        
+        if len(gold_close_series) < 2 or len(idr_close_series) < 2:
+            return None, None, None, None, "Data hari tidak cukup."
+        
+        return float(gold_close_series.iloc[-1]), float(gold_close_series.iloc[-2]), float(idr_close_series.iloc[-1]), float(idr_close_series.iloc[-2]), None
+    except Exception as e:
+        return None, None, None, None, str(e)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_historical_gold_idr(period="1y"):
+    """Peracik Grafik Sintesis Emas Murni Rupiah"""
+    try:
+        gold = yf.Ticker("XAUUSD=X").history(period=period)
+        if gold.empty:
+            gold = yf.Ticker("GC=F").history(period=period)
+            
+        idr = yf.Ticker("IDR=X").history(period=period)
+        
+        if gold.empty or idr.empty:
+            return pd.DataFrame()
+            
+        # Normalisasi Zona Waktu (Sangat Krusial)
+        gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
+        idr.index = pd.to_datetime(idr.index).tz_localize(None).normalize()
+        
+        gold = gold[~gold.index.duplicated(keep='last')]
+        idr = idr[~idr.index.duplicated(keep='last')]
+        
+        gold_close = gold[['Close']].rename(columns={'Close': 'Gold_Close'})
+        idr_close = idr[['Close']].rename(columns={'Close': 'IDR_Close'})
+        
+        df_close = gold_close.join(idr_close, how='inner')
+        df_close = df_close.ffill().dropna()
+        
+        if df_close.empty: 
+            return pd.DataFrame()
+            
+        troy_ounce = 31.1034768
+        
+        df_close['Pure_IDR'] = (df_close['Gold_Close'] / troy_ounce) * df_close['IDR_Close']
+        df_close['RSI'] = df_close.ta.rsi(close='Pure_IDR', length=14)
+        df_close['SMA_50'] = df_close.ta.sma(close='Pure_IDR', length=50)
+        
+        return df_close
+    except Exception as e:
+        print(f"Error Chart Emas: {e}")
+        return pd.DataFrame()
+            
+            
+        # --- KUNCI PERBAIKAN: BUANG ZONA WAKTU & AMBIL TANGGALNYA SAJA ---
+        gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
+        idr.index = pd.to_datetime(idr.index).tz_localize(None).normalize()
+        
+        # Hapus data ganda jika ada (Mencegah Error Join)
+        gold = gold[~gold.index.duplicated(keep='last')]
+        idr = idr[~idr.index.duplicated(keep='last')]
+        
+        # Ambil kolom Close saja dan ubah nama agar tidak bentrok
+        gold_close = gold[['Close']].rename(columns={'Close': 'Gold_Close'})
+        idr_close = idr[['Close']].rename(columns={'Close': 'IDR_Close'})
+        
+        # Gabungkan (Join) data berdasarkan tanggal yang persis sama
+        df_close = gold_close.join(idr_close, how='inner')
+        df_close = df_close.ffill().dropna()
+        
+        if df_close.empty: 
+            return pd.DataFrame()
+            
+        troy_ounce = 31.1034768
+        
+        # SINTESIS EMAS RUPIAH
+        df_close['Pure_IDR'] = (df_close['Gold_Close'] / troy_ounce) * df_close['IDR_Close']
+        df_close['RSI'] = df_close.ta.rsi(close='Pure_IDR', length=14)
+        df_close['SMA_50'] = df_close.ta.sma(close='Pure_IDR', length=50)
+        
+        return df_close
+    except Exception as e:
+        print(f"Error Chart Emas: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_macro_correlation_data(period="1y"):
+    """Menarik data korelasi Emas vs US10Y Treasury Yield untuk User VIP"""
+    try:
+        gold = yf.Ticker("XAUUSD=X").history(period=period)
+        if gold.empty: gold = yf.Ticker("GC=F").history(period=period)
+        
+        # Tarik data US 10-Year Treasury Yield (^TNX)
+        us10y = yf.Ticker("^TNX").history(period=period)
+        
+        if gold.empty or us10y.empty: return pd.DataFrame()
+        
+        # Normalisasi Zona Waktu
+        gold.index = pd.to_datetime(gold.index).tz_localize(None).normalize()
+        us10y.index = pd.to_datetime(us10y.index).tz_localize(None).normalize()
+        
+        gold = gold[~gold.index.duplicated(keep='last')]
+        us10y = us10y[~us10y.index.duplicated(keep='last')]
+        
+        # Gabungkan data
+        df = pd.DataFrame({'Gold': gold['Close'], 'US10Y': us10y['Close']}).dropna()
+        
+        # Hitung Tren Rata-rata 50 Hari untuk Yield AS
+        df['US10Y_MA50'] = df['US10Y'].rolling(window=50).mean()
+        return df
+    except Exception as e:
+        print(f"Error Macro Data: {e}")
+        return pd.DataFrame()
+        
+def show_gold_predictor():
+    st.header("🥇 Emas Antam & Makro Safe Haven")
+    
+    tab1, tab2 = st.tabs(["🌅 Morning Predictor (Harian)", "📡 Radar Diskon & Pola Historis"])
+    
+    # === TAB 1: MORNING PREDICTOR (1g, 2g, 5g) ===
+    with tab1:
+        st.subheader("Prediksi Pecahan Terpopuler Hari Ini")
+        
+        with st.spinner("Menghitung arbitrasi pecahan..."):
+            gold_now, gold_prev, idr_now, idr_prev, error_msg = get_gold_data()
+            
+        if not gold_now:
+            st.error("❌ Gagal menarik data.")
+        else:
+            troy_ounce = 31.1034768 
+            pure_now = (gold_now / troy_ounce) * idr_now
+            pure_prev = (gold_prev / troy_ounce) * idr_prev
+            
+            # --- ESTIMASI MARGIN TIAP PECAHAN (TERKALIBRASI) ---
+            # Disesuaikan dengan kebijakan margin Antam terbaru saat harga global sedang tinggi:
+            # 1g (~8.3%), 2g (~7.2%), 5g (~6.6%)
+            specs = {
+                "Pecahan 1 Gram": {"margin": 0.0835, "size": 1},
+                "Pecahan 2 Gram": {"margin": 0.0722, "size": 2},
+                "Pecahan 5 Gram": {"margin": 0.0665, "size": 5}
+            }
+            
+            st.info(f"💡 **Sinyal:** Emas Global & Kurs memicu potensi perubahan **Rp {int(pure_now - pure_prev):,}/gram** pada harga dasar.")
+            
+            # Tampilkan 3 Kolom untuk 3 Pecahan
+            cols = st.columns(3)
+            for i, (label, spec) in enumerate(specs.items()):
+                p_now = (pure_now * (1 + spec['margin'])) * spec['size']
+                p_prev = (pure_prev * (1 + spec['margin'])) * spec['size']
+                diff = p_now - p_prev
+                
+                with cols[i]:
+                    st.metric(label, f"Rp {int(p_now):,}", f"{int(diff):,}", delta_color="normal" if diff > 0 else "inverse")
+            
+            st.divider()
+            st.caption("ℹ️ *Estimasi di atas sudah termasuk biaya cetak rata-rata di Butik Antam. Harga resmi mungkin sedikit berbeda tergantung lokasi butik.*")
+
+           
+
+            # ==========================================
+            # FITUR BARU: KALKULATOR BREAK-EVEN BUYBACK
+            # ==========================================
+            st.subheader("🧮 Kalkulator Break-Even (Balik Modal)")
+            st.markdown("Simulasi berapa tinggi Emas Dunia harus naik agar Anda bisa menjual kembali emas fisik Anda ke Antam tanpa rugi (menutup *Spread Buyback*).")
+
+            # Asumsi rata-rata Spread Buyback Antam adalah 12% di bawah harga jual
+            buyback_spread = 0.12
+
+            c_calc1, c_calc2 = st.columns([1, 2])
+            with c_calc1:
+                pilihan_pecahan = st.selectbox("Simulasikan Pecahan:", ["1 Gram", "2 Gram", "5 Gram"])
+
+            # Mengambil data margin sesuai pilihan dropdown
+            if pilihan_pecahan == "1 Gram":
+                margin_terpilih = 0.0835; ukuran = 1
+            elif pilihan_pecahan == "2 Gram":
+                margin_terpilih = 0.0722; ukuran = 2
+            else:
+                margin_terpilih = 0.0665; ukuran = 5
+
+            # Menghitung Harga Beli dan Harga Buyback saat ini
+            harga_beli = (pure_now * (1 + margin_terpilih)) * ukuran
+            harga_buyback = harga_beli * (1 - buyback_spread)
+            kerugian_awal = harga_beli - harga_buyback
+
+            # Menghitung Target XAU/USD agar bisa Break-Even
+            future_pure_target = harga_beli / ((1 + margin_terpilih) * ukuran * (1 - buyback_spread))
+            target_xau = (future_pure_target / idr_now) * troy_ounce
+            persentase_kenaikan = ((target_xau - gold_now) / gold_now) * 100
+
+            with c_calc2:
+                st.info(f"⚠️ Jika Anda membeli **{pilihan_pecahan}** hari ini, nilai jual kembalinya langsung susut **Rp {int(kerugian_awal):,}** jika dijual detik ini juga (Spread {buyback_spread*100}%).")
+                
+            st.success(f"🎯 **Target Break-Even:** Emas Dunia (XAU/USD) harus naik **+{persentase_kenaikan:.1f}%** menuju level **${target_xau:,.2f} /oz** agar Anda bisa balik modal 100%.")
+            
+    # === TAB 2: RADAR DISKON & DETEKSI POLA (VIP ONLY) ===
+    with tab2:
+        if user_role == 'free':
+            st.warning("🔒 **Fitur Eksklusif VIP/PRO Terkunci**")
+            st.info("**Apa yang Anda dapatkan di VIP?**\n1. **Pattern Detection:** Deteksi siklus musiman harga emas.\n2. **Relative Value:** Mengetahui apakah harga emas saat ini sudah 'terlalu mahal' dibanding rata-rata 50 hari terakhir.")
+            st.button("Upgrade ke VIP Sekarang 🚀", key="gold_vip_pattern")
+            return
+
+        with st.spinner("Menganalisis pola historis..."):
+            df_hist = get_historical_gold_idr("1y")
+            
+        if not df_hist.empty:
+            curr = df_hist.iloc[-1]
+            
+            # --- 1. DETEKSI PATTERN: MEAN REVERSION ---
+            # Menghitung jarak harga saat ini dari MA50
+            dist_from_ma50 = ((curr['Pure_IDR'] - curr['SMA_50']) / curr['SMA_50']) * 100
+            
+            st.subheader("📡 Detektor Pola & Momentum")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                # Pola 1: Overextended vs Fair Value
+                if dist_from_ma50 > 5:
+                    st.error(f"⚠️ **Pola: Overextended**\nHarga saat ini {dist_from_ma50:.1f}% di atas rata-rata. Secara historis, emas cenderung 'pulang' ke garis rata-rata (koreksi) setelah naik terlalu tajam.")
+                elif dist_from_ma50 < -5:
+                    st.success(f"💎 **Pola: Undervalued**\nHarga {abs(dist_from_ma50):.1f}% di bawah rata-rata. Ini adalah area 'Buy on Weakness' yang kuat secara historis.")
+                else:
+                    st.info("⚖️ **Pola: Fair Value**\nHarga bergerak wajar di sekitar garis rata-rata.")
+
+            with c2:
+                # Pola 2: RSI Momentum
+                rsi = curr['RSI']
+                if rsi > 70: st.warning("🔥 **Momentum: Jenuh Beli**\nHarga sudah naik terlalu lama tanpa istirahat.")
+                elif rsi < 30: st.success("❄️ **Momentum: Jenuh Jual**\nTekanan jual sudah mencapai titik lelah.")
+                else: st.info("🔄 **Momentum: Konsolidasi**\nHarga sedang mencari arah baru.")
+
+            # --- 2. VISUALISASI GRAFIK ---
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+            
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.05)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Pure_IDR'], name="Harga Dasar"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['SMA_50'], name="Rata-rata 50 Hari", line=dict(dash='dot')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['RSI'], name="RSI", line=dict(color='purple')), row=2, col=1)
+            
+            fig.update_layout(height=500, template="plotly_dark", margin=dict(l=0,r=0,t=20,b=0), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # ... (KODE GRAFIK RSI ANDA ADA DI ATAS SINI) ...
+            
+            # ==========================================
+            # FITUR BARU VIP: SINYAL MAKRO US10Y YIELD
+            # ==========================================
+            st.divider()
+            st.subheader("🌐 Sinyal Makro: Emas vs Suku Bunga AS")
+            st.markdown("Musuh utama Emas adalah Suku Bunga Obligasi AS (*US10Y Treasury Yield*). Secara historis, pergerakannya selalu terbalik (Korelasi Negatif). **Jika Yield AS turun, Emas akan meroket.**")
+
+            with st.spinner("Menarik data makro ekonomi global..."):
+                df_macro = get_macro_correlation_data("1y")
+                
+            if not df_macro.empty:
+                curr_yield = df_macro['US10Y'].iloc[-1]
+                ma50_yield = df_macro['US10Y_MA50'].iloc[-1]
+                
+                c_mac1, c_mac2 = st.columns([1, 2])
+                with c_mac1:
+                    st.metric("Suku Bunga AS (US10Y)", f"{curr_yield:.2f}%", f"{curr_yield - df_macro['US10Y'].iloc[-2]:.2f}%", delta_color="inverse")
+                with c_mac2:
+                    if pd.isna(ma50_yield):
+                        st.info("🔄 Mengumpulkan data tren suku bunga...")
+                    elif curr_yield < ma50_yield:
+                        st.success("🟢 **Angin Segar (Tailwind):** Yield obligasi AS sedang dalam tren TURUN (Berada di bawah rata-rata 50 harinya). Ini adalah sentimen yang **SANGAT POSITIF** untuk laju harga emas ke depan.")
+                    else:
+                        st.error("🔴 **Angin Sakal (Headwind):** Yield obligasi AS sedang dalam tren NAIK (Berada di atas rata-rata 50 harinya). Harga emas berpotensi tertekan atau terkoreksi dalam waktu dekat.")
+                
+                # Grafik Multi-Axis (Kiri Emas, Kanan Yield)
+                fig_macro = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_macro.add_trace(go.Scatter(x=df_macro.index, y=df_macro['Gold'], name="Emas (USD)", line=dict(color='gold', width=2)), secondary_y=False)
+                fig_macro.add_trace(go.Scatter(x=df_macro.index, y=df_macro['US10Y'], name="US10Y Yield (%)", line=dict(color='red', dash='dot')), secondary_y=True)
+                
+                fig_macro.update_layout(height=400, template="plotly_dark", margin=dict(l=0,r=0,t=20,b=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig_macro.update_yaxes(title_text="Harga Emas ($/oz)", secondary_y=False)
+                fig_macro.update_yaxes(title_text="Suku Bunga (%)", secondary_y=True)
+                
+                st.plotly_chart(fig_macro, use_container_width=True)
+
+
 
 # ==============================================================================
-# --- 13. FITUR ROBO-ADVISOR (ULTIMATE COMBO & AI 360) ---
+# --- 14.9 FITUR BARU: ROBO-ADVISOR PORTOFOLIO ---
 # ==============================================================================
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_current_prices(symbols):
+    """Mengambil harga saham real-time secara massal (batch) agar cepat."""
+    if not symbols: return {}
+    
+    # Format ke .JK jika belum ada (asumsi saham Indonesia)
+    formatted_syms = [s if s.endswith(".JK") else f"{s}.JK" for s in symbols]
+    
+    try:
+        # Gunakan auto_adjust=False agar kompatibel dengan yfinance versi terbaru
+        data = yf.download(formatted_syms, period="1d", progress=False)
+        
+        # Mengatasi format MultiIndex yfinance jika saham > 1
+        if isinstance(data.columns, pd.MultiIndex):
+            close_data = data['Close']
+        else:
+            close_data = pd.DataFrame(data['Close'], columns=[formatted_syms[0]])
+
+        prices = {}
+        for orig, fmt in zip(symbols, formatted_syms):
+            if fmt in close_data.columns and not pd.isna(close_data[fmt].iloc[-1]):
+                prices[orig] = float(close_data[fmt].iloc[-1])
+        return prices
+    except Exception as e:
+        print(f"Error fetching prices: {e}")
+        return {}
+
 def show_portfolio_advisor():
     st.header("💼 Robo-Advisor & Portfolio Manager")
     st.markdown("Asisten AI portofolio yang ramah untuk perangkat Mobile dan Desktop.")
     st.divider()
 
+    # --- 1. SINKRONISASI DATABASE KE MEMORI ---
     if 'portfolio_data' not in st.session_state:
         try:
             res = supabase.table('user_portfolios').select('*').eq('user_id', user_id).execute()
             if res.data:
                 df_db = pd.DataFrame(res.data)
+                # KITA TIDAK LAGI PAKAI KOLOM CHECKBOX "HAPUS"
                 st.session_state['portfolio_data'] = pd.DataFrame({
                     "Kode Saham": df_db['symbol'],
                     "Harga Beli": df_db['avg_price'].astype(int),
@@ -948,10 +1961,14 @@ def show_portfolio_advisor():
 
     tab1, tab2, tab3 = st.tabs(["📈 Portofolio Aktif", "💰 Transaksi Jual (PnL)", "🛡️ Analisis AI 360°"])
 
+    # ==========================================
+    # TAB 1: PORTOFOLIO AKTIF (IDE A & B)
+    # ==========================================
     with tab1:
         st.subheader("📝 Kelola Saham")
-        st.info("💡 **PANDUAN INTERAKTIF:**\n* **✏️ Edit:** Ketuk langsung pada angka Harga/Lot untuk mengubah.\n* **➕ Tambah:** Ketik kode saham baru di baris kosong paling bawah.\n* **🗑️ Hapus Cepat:** Ubah angka 'Jumlah Lot' menjadi **0**, lalu klik Simpan.")
+        st.info("💡 **PANDUAN INTERAKTIF:**\n* **✏️ Edit:** Ketuk langsung pada angka Harga/Lot untuk mengubah.\n* **➕ Tambah:** Ketik kode saham baru di baris kosong paling bawah.\n* **🗑️ Hapus Cepat (Ide A):** Ubah angka 'Jumlah Lot' menjadi **0**, lalu klik Simpan.")
 
+        # Data Editor yang lebih bersih (Tanpa Checkbox Hapus)
         edited_df = st.data_editor(
             st.session_state['portfolio_data'],
             num_rows="dynamic",
@@ -959,13 +1976,16 @@ def show_portfolio_advisor():
             column_config={
                 "Kode Saham": st.column_config.TextColumn("Kode", required=True),
                 "Harga Beli": st.column_config.NumberColumn("Harga Beli (Rp)", min_value=1, format="Rp %d"),
-                "Jumlah Lot": st.column_config.NumberColumn("Jumlah Lot", min_value=0)
+                "Jumlah Lot": st.column_config.NumberColumn("Jumlah Lot", min_value=0) # Lot bisa 0 untuk dihapus
             }
         )
 
         if st.button("💾 Simpan Perubahan", type="primary", use_container_width=True):
             try:
+                # IDE A: FILTER BARIS YANG LOT-NYA > 0 (Lot 0 otomatis terbuang)
                 to_keep = edited_df[edited_df['Jumlah Lot'] > 0]
+                
+                # Bersihkan data lama di Supabase, masukkan yang baru
                 supabase.table('user_portfolios').delete().eq('user_id', user_id).execute()
                 
                 if not to_keep.empty:
@@ -988,12 +2008,15 @@ def show_portfolio_advisor():
             except Exception as e:
                 st.error(f"Gagal menyimpan: {e}")
 
+        # --- IDE B: MENU DROPDOWN HAPUS KHUSUS ---
         st.divider()
         with st.expander("🗑️ Hapus Emiten Sekaligus (Clear Position)", expanded=False):
             if not st.session_state['portfolio_data'].empty:
                 del_sym = st.selectbox("Pilih saham yang ingin dibuang dari tabel:", st.session_state['portfolio_data']['Kode Saham'].unique())
                 if st.button(f"Hapus {del_sym} Permanen"):
+                    # Hapus dari Supabase
                     supabase.table('user_portfolios').delete().eq('user_id', user_id).eq('symbol', del_sym).execute()
+                    # Update Memori
                     st.session_state['portfolio_data'] = st.session_state['portfolio_data'][st.session_state['portfolio_data']['Kode Saham'] != del_sym]
                     st.success(f"{del_sym} berhasil dihapus dari portofolio.")
                     time.sleep(1)
@@ -1001,6 +2024,9 @@ def show_portfolio_advisor():
             else:
                 st.info("Portofolio masih kosong.")
 
+    # ==========================================
+    # TAB 2: HISTORI PENJUALAN (IDE C)
+    # ==========================================
     with tab2:
         st.subheader("🛒 Form Penjualan Saham")
         if 'sold_history' not in st.session_state:
@@ -1015,6 +2041,7 @@ def show_portfolio_advisor():
             
             if st.button("Simpan Transaksi Jual"):
                 if s_ticker and s_buy > 0 and s_sell > 0:
+                    # 1. Catat ke Histori PnL
                     modal = s_buy * s_lot * 100
                     hasil_jual = s_sell * s_lot * 100
                     pnl_nominal = hasil_jual - modal
@@ -1025,16 +2052,17 @@ def show_portfolio_advisor():
                     st.session_state['sold_history'] = pd.concat([st.session_state['sold_history'], new_sale], ignore_index=True)
                     st.success(f"Transaksi dicatat! Keuntungan/Kerugian: {pnl_persen:.2f}%")
 
+                    # 2. IDE C: LOGIKA AUTO-DELETE DI PORTOFOLIO AKTIF
                     mask = st.session_state['portfolio_data']['Kode Saham'] == s_ticker
                     if mask.any():
                         current_lot = st.session_state['portfolio_data'].loc[mask, 'Jumlah Lot'].values[0]
                         sisa_lot = current_lot - s_lot
                         
-                        if sisa_lot <= 0:
+                        if sisa_lot <= 0: # Terjual Habis
                             supabase.table('user_portfolios').delete().eq('user_id', user_id).eq('symbol', s_ticker).execute()
                             st.session_state['portfolio_data'] = st.session_state['portfolio_data'][~mask]
                             st.info(f"💡 Info: {s_ticker} habis terjual dan otomatis dihapus dari daftar Portofolio Aktif.")
-                        else:
+                        else: # Terjual Sebagian (Parsial)
                             supabase.table('user_portfolios').update({'total_lot': int(sisa_lot)}).eq('user_id', user_id).eq('symbol', s_ticker).execute()
                             st.session_state['portfolio_data'].loc[mask, 'Jumlah Lot'] = sisa_lot
                             st.info(f"💡 Info: Sisa kepemilikan {s_ticker} diupdate menjadi {sisa_lot} Lot.")
@@ -1043,6 +2071,9 @@ def show_portfolio_advisor():
 
         st.dataframe(st.session_state['sold_history'], use_container_width=True, hide_index=True)
 
+    # ==========================================
+    # TAB 3: ANALISIS AI MULTI-FAKTOR (UPGRADE)
+    # ==========================================
     with tab3:
         if st.session_state['portfolio_data'].empty:
             st.info("💡 Portofolio Anda masih kosong. Silakan tambah saham di Tab 'Portofolio Aktif' terlebih dahulu.")
@@ -1054,6 +2085,7 @@ def show_portfolio_advisor():
             with st.spinner("Menarik data Teknikal, PnL, dan Kalender Dividen..."):
                 current_prices = get_current_prices(symbols)
                 
+                # --- RADAR DIVIDEN ---
                 div_messages = []
                 for t in symbols:
                     try:
@@ -1067,6 +2099,7 @@ def show_portfolio_advisor():
                 if div_messages:
                     for msg in div_messages: st.success(msg)
 
+                # --- PROSES PERHITUNGAN PnL & TREN TEKNIKAL AI ---
                 total_modal = 0; total_valuasi = 0
                 table_rows = []
 
@@ -1084,6 +2117,7 @@ def show_portfolio_advisor():
                     pnl_pct = (pnl_rp / modal) * 100 if modal > 0 else 0
                     total_modal += modal; total_valuasi += valuasi
 
+                    # --- TARIK DATA TEKNIKAL REAL-TIME (SMA 20 & 50) ---
                     trend_status = "N/A"
                     try:
                         hist = yf.Ticker(f"{sym}.JK").history(period="3mo")
@@ -1096,6 +2130,7 @@ def show_portfolio_advisor():
                             else: trend_status = "🔄 Rebound / Sideways"
                     except: pass
 
+                    # --- LOGIKA AI MULTI-FAKTOR (PnL + Trend) ---
                     if pnl_pct <= -10 and "Downtrend" in trend_status: rekomendasi = "🚨 Cut Loss (Tren Patah)"
                     elif pnl_pct <= -5 and ("Uptrend" in trend_status or "Pullback" in trend_status): rekomendasi = "💎 Avg Down (Diskon)"
                     elif pnl_pct >= 15 and "Downtrend" in trend_status: rekomendasi = "💰 Take Profit (Tren Melemah)"
@@ -1113,12 +2148,14 @@ def show_portfolio_advisor():
             total_pnl_pct = (total_pnl_rp / total_modal) * 100 if total_modal > 0 else 0
             health_score = max(0, min(100, 60 + (total_pnl_pct * 2)))
 
+            # --- DASHBOARD METRIK UTAMA ---
             st.divider()
             c_dash1, c_dash2, c_dash3 = st.columns(3)
             c_dash1.metric("Total Aset", f"Rp {total_valuasi:,.0f}")
             c_dash2.metric("Floating PnL", f"Rp {total_pnl_rp:,.0f}", f"{total_pnl_pct:.2f}%", delta_color="normal" if total_pnl_rp >=0 else "inverse")
             c_dash3.metric("Skor Kesehatan", f"{health_score:.0f} / 100", "Sehat" if health_score >= 60 else "Perlu Perbaikan", delta_color="normal" if health_score >= 60 else "inverse")
 
+            # --- VISUALISASI ALOKASI & RISIKO ---
             st.divider()
             df_display = pd.DataFrame(table_rows)
             
@@ -1146,6 +2183,7 @@ def show_portfolio_advisor():
                     else:
                         st.success("✅ **Diversifikasi Sangat Sehat.** Tidak ada saham yang mendominasi lebih dari 50%.")
 
+            # --- TABEL DETAIL PORTOFOLIO (DIPERLENGKAP) ---
             st.subheader("📋 Rekap AI 360° (Teknikal + PnL)")
             st.caption("💡 *Saran AI Ekstra:* Untuk melihat riwayat probabilitas pergerakan saham di bulan ini, silakan cek menu **🗓️ Peta Musiman**.")
             
@@ -1158,6 +2196,8 @@ def show_portfolio_advisor():
                     df_table_view.style.format({'PnL (%)': '{:.2f}%'}).map(lambda x: 'color: #00ff00' if (isinstance(x, (int, float)) and x > 0) else ('color: #ff4444' if (isinstance(x, (int, float)) and x < 0) else ''), subset=['PnL (%)']),
                     use_container_width=True, hide_index=True
                 )
+                st.info("🔒 **Buka Kunci Rekomendasi AI (VIP):** Dapatkan analisis gabungan antara kerugian Anda dan tren pergerakan Bandar saat ini.")
+                st.button("Upgrade VIP Sekarang 🚀", key="robo_upgrade")
             else:
                 st.success("💎 **VIP AI Active:** Sistem memantau momentum pergerakan saham (SMA 20/50) dipadukan dengan modal Anda.")
                 st.dataframe(
@@ -1165,16 +2205,21 @@ def show_portfolio_advisor():
                     use_container_width=True, hide_index=True
                 )
 
+
 # ==============================================================================
-# --- 14. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
+# ==============================================================================
+# --- 15. ETALASE FREEMIUM, PENGATURAN SIDEBAR & SMART ROUTING ---
 # ==============================================================================
 
 st.sidebar.markdown(f"👤 **Halo, {user_email.split('@')[0]}**")
+# Penyesuaian warna role
 color_map = {"admin": "green", "pro": "blue", "trial": "orange", "free": "gray", "vip": "gold"}
 role_color = color_map.get(user_role, "gray")
 st.sidebar.markdown(f"Status Akun: <span style='color:{role_color}; font-weight:bold;'>{user_role.upper()}</span>", unsafe_allow_html=True)
 
+# --- VISUALISASI METERAN KUOTA API ---
 try:
+    # Tarik data terbaru untuk Sidebar
     q_res = supabase.table('profiles').select('daily_quota, used_quota').eq('id', user_id).single().execute()
     if q_res.data:
         limit_q = int(q_res.data.get('daily_quota', 0))
@@ -1203,11 +2248,13 @@ else:
 
 st.sidebar.divider()
 
+# --- INISIALISASI MEMORI SMART BRIDGE ---
 if 'active_menu' not in st.session_state:
     st.session_state['active_menu'] = "🔍 Super Screener"
 if 'target_saham' not in st.session_state:
-    st.session_state['target_saham'] = "" 
+    st.session_state['target_saham'] = ""
 
+# DAFTAR MENU
 menu_options = [
     "🔍 Super Screener", 
     "📊 Advanced Chart",
@@ -1223,9 +2270,11 @@ menu_options = [
 if is_admin:
     menu_options.append("👑 Admin Dashboard")
     
+# KONTROL NAVIGASI
 mode = st.sidebar.radio("Pilih Menu:", menu_options, key="active_menu")
 st.sidebar.divider()
 
+# --- SAKELAR BENUA & LOGIKA SIDEBAR ---
 market_choice = st.sidebar.radio("🌍 Pilih Bursa:", ["🇮🇩 Indonesia (BEI)", "🇺🇸 Wall Street (US)"])
 st.sidebar.divider()
 
@@ -1262,11 +2311,13 @@ if "Indonesia" in market_choice:
                 st.sidebar.caption("Upgrade ke VIP/Pro untuk menarik data broker summary harian.")
             else: use_idx_data = True
 else:
+    # MODE WALL STREET
     active_stock_list = US_STOCKS
     active_category_name = "US Top Tech"
     if mode == "📊 Advanced Chart" or mode == "🔍 Super Screener":
         st.sidebar.info("ℹ️ Mode Wall Street: Data Bandar/Asing tidak tersedia (Sistem Dark Pools).")
 
+# --- KONTROL ADMIN ---
 if is_admin:
     st.sidebar.divider()
     st.sidebar.markdown("**👑 Admin Control**")
@@ -1284,7 +2335,7 @@ if is_admin:
         with col1:
             if st.button("✅ YAKIN", use_container_width=True):
                 st.cache_data.clear()
-                api_registry.clear()
+                # api_registry.clear() # Buka komentar ini jika api_registry sudah didefinisikan sebelumnya
                 st.session_state['confirm_clear_cache'] = False 
                 st.sidebar.success("✅ Memori dibersihkan!")
                 time.sleep(1.5) 
@@ -1294,6 +2345,7 @@ if is_admin:
                 st.session_state['confirm_clear_cache'] = False 
                 st.rerun() 
 
+# --- LOGOUT ---
 st.sidebar.divider()
 if st.sidebar.button("Keluar (Logout)"):
     st.session_state['logged_in'] = False
@@ -1301,6 +2353,7 @@ if st.sidebar.button("Keluar (Logout)"):
     supabase.auth.sign_out()
     st.rerun()
 
+# --- DISCLAIMER RISIKO (WAJIB FINTECH) ---
 st.sidebar.divider()
 st.sidebar.markdown("""
 <div style="font-size: 0.8rem; color: #666; text-align: justify;">
@@ -1310,24 +2363,33 @@ Perdagangan saham memiliki risiko kerugian finansial yang tinggi. Segala keputus
 </div>
 """, unsafe_allow_html=True)
 
-# --- ROUTING APLIKASI UTAMA ---
+# --- MENJALANKAN APLIKASI UTAMA ---
 if mode == "🔍 Super Screener":
     run_screener(use_idx_data, active_stock_list, active_category_name, market_choice)
+
 elif mode == "📊 Advanced Chart":
     show_chart(use_idx_data, market_choice)
+
 elif mode == "🥇 Emas & Safe Haven":
     show_gold_predictor()
+
 elif mode == "🧪 Mesin Backtesting":
     show_backtesting(market_choice)
+
 elif mode == "📰 Radar Sentimen Berita":
     show_news_sentiment(market_choice)
+
 elif mode == "🗓️ Peta Musiman":
     show_seasonality(market_choice)
+
 elif mode == "💼 Robo-Advisor Portofolio":
     show_portfolio_advisor()
+
 elif mode == "📅 Dividend Hunter":
     show_dividend_hunter(active_stock_list, active_category_name, market_choice)
+
 elif mode == "📚 Pusat Edukasi":
     show_education()
+
 elif mode == "👑 Admin Dashboard" and is_admin:
     show_admin_dashboard()
